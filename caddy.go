@@ -18,7 +18,7 @@ func (RedisStorage) CaddyModule() caddy.ModuleInfo {
 	return caddy.ModuleInfo{
 		ID: "caddy.storage.redis",
 		New: func() caddy.Module {
-			return NewRedisStorage()
+			return New()
 		},
 	}
 }

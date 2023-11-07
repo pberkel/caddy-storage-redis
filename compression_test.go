@@ -8,7 +8,7 @@ import (
 
 func TestRedisStorage_ComressUncompress(t *testing.T) {
 
-	rs := NewRedisStorage()
+	rs := New()
 	originalValue := []byte("Q2FkZHkgUmVkaXMgU3RvcmFnZQ==")
 
 	compressedValue, err := rs.compress(originalValue)

@@ -82,7 +82,7 @@ type StorageData struct {
 }
 
 // create a new RedisStorage struct with default values
-func NewRedisStorage() *RedisStorage {
+func New() *RedisStorage {
 
 	rs := RedisStorage{
 		Host:        defaultHost,

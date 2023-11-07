@@ -8,7 +8,7 @@ import (
 
 func TestRedisStorage_EncryptDecrypt(t *testing.T) {
 
-	rs := NewRedisStorage()
+	rs := New()
 	rs.EncryptionKey = "1aedfs5kcM8lOZO3BDDMuwC23croDwRr"
 	originalValue := []byte("Q2FkZHkgUmVkaXMgU3RvcmFnZQ==")
 

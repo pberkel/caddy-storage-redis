@@ -40,7 +40,7 @@ var (
 func provisionRedisStorage(t *testing.T) (*RedisStorage, context.Context) {
 
 	ctx := context.Background()
-	rs := NewRedisStorage()
+	rs := New()
 
 	logger, _ := zap.NewProduction()
 	rs.logger = logger.Sugar()
@@ -305,12 +305,12 @@ func lockAndUnlock(t *testing.T, wg *sync.WaitGroup, rs *RedisStorage, key strin
 
 func TestRedisStorage_String(t *testing.T) {
 
-	rs := NewRedisStorage()
+	rs := New()
 	redacted := `REDACTED`
 
 	t.Run("Validate password", func(t *testing.T) {
 		t.Run("is redacted when set", func(t *testing.T) {
-			testrs := NewRedisStorage()
+			testrs := New()
 			password := "iAmASuperSecurePassword"
 			rs.Password = password
 			err := json.Unmarshal([]byte(rs.String()), &testrs)
@@ -327,7 +327,7 @@ func TestRedisStorage_String(t *testing.T) {
 	})
 	t.Run("Validate AES key", func(t *testing.T) {
 		t.Run("is redacted when set", func(t *testing.T) {
-			testrs := NewRedisStorage()
+			testrs := New()
 			aeskey := "abcdefghijklmnopqrstuvwxyz123456"
 			rs.EncryptionKey = aeskey
 			err := json.Unmarshal([]byte(rs.String()), &testrs)
