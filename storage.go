@@ -51,9 +51,6 @@ const (
 
 	// How frequently the Lock's TTL should be updated
 	lockRefreshInterval = 3 * time.Second
-
-	// Items to scan during each List iteration
-	scanCount = 500
 )
 
 type RedisStorage struct {
@@ -175,7 +172,7 @@ func (rs RedisStorage) Store(ctx context.Context, key string, value []byte) erro
 	var prefixedKey = rs.prefixKey(key)
 
 	// Create directory structure set for current key
-	if err := rs.storeDirectoryEntry(ctx, prefixedKey, false); err != nil {
+	if err := rs.storeDirectoryData(ctx, prefixedKey, false); err != nil {
 		return fmt.Errorf("Unable to create directory for key %s: %v", key, err)
 	}
 
@@ -223,7 +220,7 @@ func (rs RedisStorage) Delete(ctx context.Context, key string) error {
 	var prefixedKey = rs.prefixKey(key)
 
 	// Remove current key from directory structure
-	if err := rs.deleteDirectoryEntry(ctx, prefixedKey, false); err != nil {
+	if err := rs.deleteDirectoryData(ctx, prefixedKey, false); err != nil {
 		return fmt.Errorf("Unable to delete directory for key %s: %v", key, err)
 	}
 
@@ -244,41 +241,31 @@ func (rs RedisStorage) Exists(ctx context.Context, key string) bool {
 
 func (rs RedisStorage) List(ctx context.Context, dir string, recursive bool) ([]string, error) {
 
-	var pointer uint64 = 0
 	var keyList []string
-	var prefixedKey = rs.prefixKey(dir)
 
-	for {
-		// Scan for all direct child keys stored in the directory Set
-		keys, nextPointer, err := rs.client.SScan(ctx, prefixedKey, pointer, "", scanCount).Result()
-		if err != nil {
-			return keyList, fmt.Errorf("Unable to scan set %s: %v", dir, err)
-		}
+	// Obtain list of all direct child keys stored in the directory Set
+	keys, err := rs.client.SMembers(ctx, rs.prefixKey(dir)).Result()
+	if err != nil {
+		return keyList, fmt.Errorf("Unable to get members of set %s: %v", dir, err)
+	}
 
-		// Iterate over each child key
-		for _, k := range keys {
-			// Directory keys will have a "/" suffix
-			trimmedKey := strings.TrimSuffix(k, "/")
-			// Reconstruct the full path of child key
-			fullPathKey := path.Join(dir, trimmedKey)
-			// If current key is a directory
-			if k != trimmedKey && recursive {
-				// Recursively traverse all child directories
-				childKeys, err := rs.List(ctx, fullPathKey, recursive)
-				if err != nil {
-					return keyList, err
-				}
-				keyList = append(keyList, childKeys...)
-			} else {
-				keyList = append(keyList, fullPathKey)
+	// Iterate over each child key
+	for _, k := range keys {
+		// Directory keys will have a "/" suffix
+		trimmedKey := strings.TrimSuffix(k, "/")
+		// Reconstruct the full path of child key
+		fullPathKey := path.Join(dir, trimmedKey)
+		// If current key is a directory
+		if recursive && k != trimmedKey {
+			// Recursively traverse all child directories
+			childKeys, err := rs.List(ctx, fullPathKey, recursive)
+			if err != nil {
+				return keyList, err
 			}
+			keyList = append(keyList, childKeys...)
+		} else {
+			keyList = append(keyList, fullPathKey)
 		}
-
-		// End of results reached
-		if nextPointer == 0 {
-			break
-		}
-		pointer = nextPointer
 	}
 
 	return keyList, nil
@@ -390,7 +377,7 @@ func (rs RedisStorage) loadStorageData(ctx context.Context, key string) (*Storag
 	return sd, nil
 }
 
-func (rs RedisStorage) storeDirectoryEntry(ctx context.Context, key string, baseIsDir bool) error {
+func (rs RedisStorage) storeDirectoryData(ctx context.Context, key string, baseIsDir bool) error {
 
 	// Extract parent directory and base (file) names from key
 	dir, base := rs.splitDirectoryKey(key, baseIsDir)
@@ -409,13 +396,13 @@ func (rs RedisStorage) storeDirectoryEntry(ctx context.Context, key string, base
 	if success > 0 {
 		// recursively create parent directory until already
 		// created (success == 0) or top level reached
-		rs.storeDirectoryEntry(ctx, dir, true)
+		rs.storeDirectoryData(ctx, dir, true)
 	}
 
 	return nil
 }
 
-func (rs RedisStorage) deleteDirectoryEntry(ctx context.Context, key string, baseIsDir bool) error {
+func (rs RedisStorage) deleteDirectoryData(ctx context.Context, key string, baseIsDir bool) error {
 
 	dir, base := rs.splitDirectoryKey(key, baseIsDir)
 	// Reached the top-level directory
@@ -432,7 +419,7 @@ func (rs RedisStorage) deleteDirectoryEntry(ctx context.Context, key string, bas
 	if exists := rs.client.Exists(ctx, dir).Val(); exists == 0 {
 		// Recursively delete parent directory until parent
 		// is not empty (exists > 0) or top level reached
-		rs.deleteDirectoryEntry(ctx, dir, true)
+		rs.deleteDirectoryData(ctx, dir, true)
 	}
 
 	return nil
