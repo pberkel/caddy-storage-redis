@@ -172,7 +172,7 @@ func (rs RedisStorage) Store(ctx context.Context, key string, value []byte) erro
 	var prefixedKey = rs.prefixKey(key)
 
 	// Create directory structure set for current key
-	if err := rs.storeDirectoryData(ctx, prefixedKey, false); err != nil {
+	if err := rs.storeDirectoryRecord(ctx, prefixedKey, sd.Modified, false); err != nil {
 		return fmt.Errorf("Unable to create directory for key %s: %v", key, err)
 	}
 
@@ -220,7 +220,7 @@ func (rs RedisStorage) Delete(ctx context.Context, key string) error {
 	var prefixedKey = rs.prefixKey(key)
 
 	// Remove current key from directory structure
-	if err := rs.deleteDirectoryData(ctx, prefixedKey, false); err != nil {
+	if err := rs.deleteDirectoryRecord(ctx, prefixedKey, false); err != nil {
 		return fmt.Errorf("Unable to delete directory for key %s: %v", key, err)
 	}
 
@@ -243,10 +243,10 @@ func (rs RedisStorage) List(ctx context.Context, dir string, recursive bool) ([]
 
 	var keyList []string
 
-	// Obtain list of all direct child keys stored in the directory Set
-	keys, err := rs.client.SMembers(ctx, rs.prefixKey(dir)).Result()
+	// Obtain range of all direct children stored in the Sorted Set
+	keys, err := rs.client.ZRange(ctx, rs.prefixKey(dir), 0, -1).Result()
 	if err != nil {
-		return keyList, fmt.Errorf("Unable to get members of set %s: %v", dir, err)
+		return keyList, fmt.Errorf("Unable to get range of sorted set %s: %v", dir, err)
 	}
 
 	// Iterate over each child key
@@ -377,7 +377,7 @@ func (rs RedisStorage) loadStorageData(ctx context.Context, key string) (*Storag
 	return sd, nil
 }
 
-func (rs RedisStorage) storeDirectoryData(ctx context.Context, key string, baseIsDir bool) error {
+func (rs RedisStorage) storeDirectoryRecord(ctx context.Context, key string, ts time.Time, baseIsDir bool) error {
 
 	// Extract parent directory and base (file) names from key
 	dir, base := rs.splitDirectoryKey(key, baseIsDir)
@@ -387,7 +387,7 @@ func (rs RedisStorage) storeDirectoryData(ctx context.Context, key string, baseI
 	}
 
 	// Insert "base" value into Set "dir"
-	success, err := rs.client.SAdd(ctx, dir, base).Result()
+	success, err := rs.client.ZAdd(ctx, dir, redis.Z{Score: float64(ts.Unix()), Member: base}).Result()
 	if err != nil {
 		return fmt.Errorf("Unable to add %s to Set %s: %v", base, dir, err)
 	}
@@ -396,13 +396,13 @@ func (rs RedisStorage) storeDirectoryData(ctx context.Context, key string, baseI
 	if success > 0 {
 		// recursively create parent directory until already
 		// created (success == 0) or top level reached
-		rs.storeDirectoryData(ctx, dir, true)
+		rs.storeDirectoryRecord(ctx, dir, ts, true)
 	}
 
 	return nil
 }
 
-func (rs RedisStorage) deleteDirectoryData(ctx context.Context, key string, baseIsDir bool) error {
+func (rs RedisStorage) deleteDirectoryRecord(ctx context.Context, key string, baseIsDir bool) error {
 
 	dir, base := rs.splitDirectoryKey(key, baseIsDir)
 	// Reached the top-level directory
@@ -411,7 +411,7 @@ func (rs RedisStorage) deleteDirectoryData(ctx context.Context, key string, base
 	}
 
 	// Remove "base" value from Set "dir"
-	if err := rs.client.SRem(ctx, dir, base).Err(); err != nil {
+	if err := rs.client.ZRem(ctx, dir, base).Err(); err != nil {
 		return fmt.Errorf("Unable to remove %s from Set %s: %v", base, dir, err)
 	}
 
@@ -419,7 +419,7 @@ func (rs RedisStorage) deleteDirectoryData(ctx context.Context, key string, base
 	if exists := rs.client.Exists(ctx, dir).Val(); exists == 0 {
 		// Recursively delete parent directory until parent
 		// is not empty (exists > 0) or top level reached
-		rs.deleteDirectoryData(ctx, dir, true)
+		rs.deleteDirectoryRecord(ctx, dir, true)
 	}
 
 	return nil
