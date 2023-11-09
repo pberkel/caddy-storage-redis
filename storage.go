@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io/fs"
 	"path"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -19,6 +20,9 @@ import (
 )
 
 const (
+	// Redis client type
+	defaultClientType = "simple"
+
 	// Redis server host
 	defaultHost = "127.0.0.1"
 
@@ -27,9 +31,6 @@ const (
 
 	// Redis server database
 	defaultDb = 0
-
-	// Redis server timeout
-	defaultTimeout = 5
 
 	// Prepended to every Redis key
 	defaultKeyPrefix = "caddy"
@@ -43,6 +44,12 @@ const (
 	// Do not verify TLS cerficate
 	defaultTLSInsecure = true
 
+	// Routing option for cluster client
+	defaultRouteByLatency = false
+
+	// Routing option for cluster client
+	defaultRouteRandomly = false
+
 	// Redis lock time-to-live
 	lockTTL = 5 * time.Second
 
@@ -54,20 +61,24 @@ const (
 )
 
 type RedisStorage struct {
-	Address       string `json:"address"`
-	Host          string `json:"host"`
-	Port          string `json:"port"`
-	DB            int    `json:"db"`
-	Username      string `json:"username"`
-	Password      string `json:"password"`
-	Timeout       int    `json:"timeout"`
-	KeyPrefix     string `json:"key_prefix"`
-	EncryptionKey string `json:"encryption_key"`
-	Compression   bool   `json:"compression"`
-	TlsEnabled    bool   `json:"tls_enabled"`
-	TlsInsecure   bool   `json:"tls_insecure"`
+	ClientType     string   `json:"client_type"`
+	Address        []string `json:"address"`
+	Host           []string `json:"host"`
+	Port           []string `json:"port"`
+	DB             int      `json:"db"`
+	Timeout        string   `json:"timeout"`
+	Username       string   `json:"username"`
+	Password       string   `json:"password"`
+	MasterName     string   `json:"master_name"`
+	KeyPrefix      string   `json:"key_prefix"`
+	EncryptionKey  string   `json:"encryption_key"`
+	Compression    bool     `json:"compression"`
+	TlsEnabled     bool     `json:"tls_enabled"`
+	TlsInsecure    bool     `json:"tls_insecure"`
+	RouteByLatency bool     `json:"route_by_latency"`
+	RouteRandomly  bool     `json:"route_randomly"`
 
-	client *redis.Client
+	client redis.UniversalClient
 	locker *redislock.Client
 	logger *zap.SugaredLogger
 	locks  *sync.Map
@@ -85,10 +96,10 @@ type StorageData struct {
 func New() *RedisStorage {
 
 	rs := RedisStorage{
-		Host:        defaultHost,
-		Port:        defaultPort,
+		ClientType:  defaultClientType,
+		Host:        []string{defaultHost},
+		Port:        []string{defaultPort},
 		DB:          defaultDb,
-		Timeout:     defaultTimeout,
 		KeyPrefix:   defaultKeyPrefix,
 		Compression: defaultCompression,
 		TlsEnabled:  defaultTLS,
@@ -100,28 +111,79 @@ func New() *RedisStorage {
 // Initilalize Redis client and locker
 func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 
-	rs.client = redis.NewClient(&redis.Options{
-		Addr:         rs.Address,
-		Username:     rs.Username,
-		Password:     rs.Password,
-		DB:           rs.DB,
-		DialTimeout:  time.Duration(rs.Timeout) * time.Second,
-		ReadTimeout:  time.Duration(rs.Timeout) * time.Second,
-		WriteTimeout: time.Duration(rs.Timeout) * time.Second,
-	})
+	// Configure options for all client types
+	clientOpts := redis.UniversalOptions{
+		Addrs:      rs.Address,
+		MasterName: rs.MasterName,
+		Username:   rs.Username,
+		Password:   rs.Password,
+		DB:         rs.DB,
+	}
 
+	// Configure timeout values if defined
+	if rs.Timeout != "" {
+		// Was already sanity-checked in UnmarshalCaddyfile
+		timeout, _ := strconv.Atoi(rs.Timeout)
+		clientOpts.DialTimeout = time.Duration(timeout) * time.Second
+		clientOpts.ReadTimeout = time.Duration(timeout) * time.Second
+		clientOpts.WriteTimeout = time.Duration(timeout) * time.Second
+	}
+
+	// Configure cluster routing options
+	if rs.RouteByLatency || rs.RouteRandomly {
+		clientOpts.RouteByLatency = rs.RouteByLatency
+		clientOpts.RouteRandomly = rs.RouteRandomly
+	}
+
+	// Configure TLS support if enabled
 	if rs.TlsEnabled {
-		rs.client.Options().TLSConfig = &tls.Config{
+		clientOpts.TLSConfig = &tls.Config{
 			InsecureSkipVerify: rs.TlsInsecure,
 		}
 	}
 
-	// Test connection to the Redis server
-	_, err := rs.client.Ping(ctx).Result()
-	if err != nil {
-		return err
+	// Create appropriate Redis client type
+	if rs.ClientType == "failover" && clientOpts.MasterName != "" {
+
+		// Create new Redis Failover Cluster client
+		clusterClient := redis.NewFailoverClusterClient(clientOpts.Failover())
+
+		// Test connection to the Redis cluster
+		err := clusterClient.ForEachShard(ctx, func(ctx context.Context, shard *redis.Client) error {
+			return shard.Ping(ctx).Err()
+		})
+		if err != nil {
+			return err
+		}
+		rs.client = clusterClient
+
+	} else if rs.ClientType == "cluster" || len(clientOpts.Addrs) > 1 {
+
+		// Create new Redis Cluster client
+		clusterClient := redis.NewClusterClient(clientOpts.Cluster())
+
+		// Test connection to the Redis cluster
+		err := clusterClient.ForEachShard(ctx, func(ctx context.Context, shard *redis.Client) error {
+			return shard.Ping(ctx).Err()
+		})
+		if err != nil {
+			return err
+		}
+		rs.client = clusterClient
+
+	} else {
+
+		// Create new Redis simple standalone client
+		rs.client = redis.NewClient(clientOpts.Simple())
+
+		// Test connection to the Redis server
+		err := rs.client.Ping(ctx).Err()
+		if err != nil {
+			return err
+		}
 	}
 
+	// Create new redislock client
 	rs.locker = redislock.New(rs.client)
 	rs.locks = &sync.Map{}
 	return nil
@@ -242,11 +304,12 @@ func (rs RedisStorage) Exists(ctx context.Context, key string) bool {
 func (rs RedisStorage) List(ctx context.Context, dir string, recursive bool) ([]string, error) {
 
 	var keyList []string
+	var currKey = rs.prefixKey(dir)
 
 	// Obtain range of all direct children stored in the Sorted Set
-	keys, err := rs.client.ZRange(ctx, rs.prefixKey(dir), 0, -1).Result()
+	keys, err := rs.client.ZRange(ctx, currKey, 0, -1).Result()
 	if err != nil {
-		return keyList, fmt.Errorf("Unable to get range of sorted set %s: %v", dir, err)
+		return keyList, fmt.Errorf("Unable to get range on sorted set '%s': %v", currKey, err)
 	}
 
 	// Iterate over each child key
