@@ -2,16 +2,35 @@ package storageredis
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
 	"net"
+	"reflect"
 	"strconv"
+
+	"github.com/spf13/cobra"
 
 	"github.com/caddyserver/caddy/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
+	caddycmd "github.com/caddyserver/caddy/v2/cmd"
 	"github.com/caddyserver/certmagic"
 )
 
 func init() {
 	caddy.RegisterModule(RedisStorage{})
+	caddycmd.RegisterCommand(caddycmd.Command{
+		Name:  "redis",
+		Short: "Commands for working with the Caddy Redis Storage module",
+		CobraFunc: func(cmd *cobra.Command) {
+			rebuildCmd := &cobra.Command{
+				Use:   "repair --config <path>",
+				Short: "Repair the Redis Storage directory index tree",
+				RunE:  caddycmd.WrapCommandFuncForCobra(cmdRedisStorageRepair),
+			}
+			rebuildCmd.Flags().StringP("config", "c", "", "Caddy configuration file (optional)")
+			cmd.AddCommand(rebuildCmd)
+		},
+	})
 }
 
 func (RedisStorage) CaddyModule() caddy.ModuleInfo {
@@ -220,6 +239,47 @@ func (rs *RedisStorage) Cleanup() error {
 	}
 
 	return nil
+}
+
+type storageConfig struct {
+	StorageRaw json.RawMessage `json:"storage,omitempty" caddy:"namespace=caddy.storage inline_key=module"`
+}
+
+func cmdRedisStorageRepair(fl caddycmd.Flags) (int, error) {
+
+	configFile := fl.String("config")
+
+	// Load configuration file (if not specified, will look in usual locations)
+	cfg, _, err := caddycmd.LoadConfig(configFile, "")
+	if err != nil {
+		return caddy.ExitCodeFailedStartup, fmt.Errorf("Unable to load config file: %v", err)
+	}
+
+	// Unmarshall the storage configuration into a temporary struct
+	var storeCfg storageConfig
+	if err := json.Unmarshal(cfg, &storeCfg); err != nil || storeCfg.StorageRaw == nil {
+		return caddy.ExitCodeFailedStartup, fmt.Errorf("Unable to unmarshal configuration: %v", err)
+	}
+
+	ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})
+	defer cancel()
+
+	// Load module
+	module, err := ctx.LoadModule(&storeCfg, "StorageRaw")
+	if err != nil {
+		return caddy.ExitCodeFailedStartup, err
+	}
+	// Ensure loaded module is the correct type
+	if reflect.TypeOf(module) != reflect.TypeOf(&RedisStorage{}) {
+		return caddy.ExitCodeFailedStartup, fmt.Errorf("Loaded storage module does not support Redis")
+	}
+
+	rs := module.(*RedisStorage)
+	if err := rs.Repair(ctx, ""); err != nil {
+		return caddy.ExitCodeFailedStartup, err
+	}
+
+	return caddy.ExitCodeSuccess, nil
 }
 
 // Interface guards

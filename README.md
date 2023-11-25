@@ -9,7 +9,6 @@ This is comprehensive rewrite of the [gamalan/caddy-tlsredis](https://github.com
 
 The plugin uses the latest version of the [go-redis/redis](https://github.com/go-redis/redis) client and [redislock](https://github.com/bsm/redislock) for the locking mechanism. See [distlock](https://redis.io/topics/distlock) for more information on the lock algorithm.
 
-
 ## Upgrading
 
 Previous configuration options are generally compatible except for `CADDY_CLUSTERING_REDIS_*` environment variables, which have been removed.  To configure this Redis Storage module using environment variables, see the example configuration below.
@@ -115,3 +114,13 @@ Connecting to Redis servers managed by Sentinal requires both the `failover` fla
 }
 ```
 Failover mode also supports the `route_by_latency` and `route_randomly` cluster configuration parameters.
+
+## Maintenance
+
+This module has been architected to maintain a hierarchical index of storage items using Redis Sorted Sets to optimize directory listing operations typically used by Caddy.  It is possible for this index structure to become corrupted in the event of an unexpected system crash or loss of power.  If you suspect your Caddy storage has been corrupted, it is possible to repair this index structure from the command line by issuing the following command:
+
+```
+caddy redis repair --config /path/to/Caddyfile
+```
+
+Note that the config parameter is optional (but recommended); if not specified Caddy look for a configuration file named "Caddyfile" in the current working directory.

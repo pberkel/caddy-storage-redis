@@ -234,7 +234,8 @@ func (rs RedisStorage) Store(ctx context.Context, key string, value []byte) erro
 	var prefixedKey = rs.prefixKey(key)
 
 	// Create directory structure set for current key
-	if err := rs.storeDirectoryRecord(ctx, prefixedKey, sd.Modified, false); err != nil {
+	score := float64(sd.Modified.Unix())
+	if err := rs.storeDirectoryRecord(ctx, prefixedKey, score, false, false); err != nil {
 		return fmt.Errorf("Unable to create directory for key %s: %v", key, err)
 	}
 
@@ -415,6 +416,91 @@ func (rs *RedisStorage) Unlock(ctx context.Context, name string) error {
 	return nil
 }
 
+func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
+
+	var currKey = rs.prefixKey(dir)
+
+	// Perform recursive full key scan only from the root directory
+	if dir == "" {
+
+		var pointer uint64 = 0
+		var scanCount int64 = 500
+
+		for {
+			// Scan for keys matching the search query and iterate until all found
+			keys, nextPointer, err := rs.client.Scan(ctx, pointer, currKey+"*", scanCount).Result()
+			if err != nil {
+				return fmt.Errorf("Unable to scan path %s: %v", currKey, err)
+			}
+
+			// Iterate over returned keys
+			for _, key := range keys {
+				// Proceed only if key type is regular string value
+				keyType := rs.client.Type(ctx, key).Val()
+				if keyType != "string" {
+					continue
+				}
+
+				// Load the Storage Data struct to obtain modified time
+				trimmedKey := rs.trimKey(key)
+				sd, err := rs.loadStorageData(ctx, trimmedKey)
+				if err != nil {
+					rs.logger.Infof("Unable to load storage data for key '%s'", trimmedKey)
+					continue
+				}
+
+				// Repair directory structure set for current key
+				score := float64(sd.Modified.Unix())
+				if err := rs.storeDirectoryRecord(ctx, key, score, true, false); err != nil {
+					return fmt.Errorf("Unable to repair directory index for key '%s'", trimmedKey)
+				}
+			}
+
+			// End of results reached
+			if nextPointer == 0 {
+				break
+			}
+			pointer = nextPointer
+		}
+	}
+
+	// Obtain range of all direct children stored in the Sorted Set
+	keys, err := rs.client.ZRange(ctx, currKey, 0, -1).Result()
+	if err != nil {
+		return fmt.Errorf("Unable to get range on sorted set '%s': %v", currKey, err)
+	}
+
+	// Iterate over each child key
+	for _, k := range keys {
+		// Directory keys will have a "/" suffix
+		trimmedKey := strings.TrimSuffix(k, "/")
+
+		// Reconstruct the full path of child key
+		fullPathKey := path.Join(dir, trimmedKey)
+
+		// Remove key from set if it does not exist
+		if !rs.Exists(ctx, fullPathKey) {
+			rs.client.ZRem(ctx, currKey, k)
+			rs.logger.Infof("Removed non-existant record '%s' from directory '%s'", k, currKey)
+			continue
+		}
+
+		// If current key is a directory
+		if k != trimmedKey {
+			// Recursively traverse all child directories
+			if err := rs.Repair(ctx, fullPathKey); err != nil {
+				return err
+			}
+		}
+	}
+
+	return nil
+}
+
+func (rs *RedisStorage) trimKey(key string) string {
+	return strings.TrimPrefix(strings.TrimPrefix(key, rs.KeyPrefix), "/")
+}
+
 func (rs *RedisStorage) prefixKey(key string) string {
 	return path.Join(rs.KeyPrefix, key)
 }
@@ -440,7 +526,8 @@ func (rs RedisStorage) loadStorageData(ctx context.Context, key string) (*Storag
 	return sd, nil
 }
 
-func (rs RedisStorage) storeDirectoryRecord(ctx context.Context, key string, ts time.Time, baseIsDir bool) error {
+// Store directory index in Redis ZSet structure for fast and efficient travseral in List()
+func (rs RedisStorage) storeDirectoryRecord(ctx context.Context, key string, score float64, repair, baseIsDir bool) error {
 
 	// Extract parent directory and base (file) names from key
 	dir, base := rs.splitDirectoryKey(key, baseIsDir)
@@ -450,21 +537,25 @@ func (rs RedisStorage) storeDirectoryRecord(ctx context.Context, key string, ts 
 	}
 
 	// Insert "base" value into Set "dir"
-	success, err := rs.client.ZAdd(ctx, dir, redis.Z{Score: float64(ts.Unix()), Member: base}).Result()
+	success, err := rs.client.ZAdd(ctx, dir, redis.Z{Score: score, Member: base}).Result()
 	if err != nil {
 		return fmt.Errorf("Unable to add %s to Set %s: %v", base, dir, err)
 	}
 
 	// Non-zero success means base was added to the set (not already there)
-	if success > 0 {
+	if success > 0 || repair {
+		if success > 0 && repair {
+			rs.logger.Infof("Repaired index for record '%s' in directory '%s'", base, dir)
+		}
 		// recursively create parent directory until already
 		// created (success == 0) or top level reached
-		rs.storeDirectoryRecord(ctx, dir, ts, true)
+		rs.storeDirectoryRecord(ctx, dir, score, repair, true)
 	}
 
 	return nil
 }
 
+// Delete record from directory index Redis ZSet structure
 func (rs RedisStorage) deleteDirectoryRecord(ctx context.Context, key string, baseIsDir bool) error {
 
 	dir, base := rs.splitDirectoryKey(key, baseIsDir)
