@@ -60,6 +60,8 @@ const (
 	lockRefreshInterval = 3 * time.Second
 )
 
+// RedisStorage implements Redis storage plugin functionality for Caddy.
+// It supports connecting to standalone, Cluster, or Sentinal (Failover) Redis servers.
 type RedisStorage struct {
 	ClientType     string   `json:"client_type"`
 	Address        []string `json:"address"`
