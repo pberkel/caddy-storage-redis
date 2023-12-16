@@ -3,6 +3,7 @@ package storageredis
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -77,6 +78,7 @@ type RedisStorage struct {
 	Compression    bool     `json:"compression"`
 	TlsEnabled     bool     `json:"tls_enabled"`
 	TlsInsecure    bool     `json:"tls_insecure"`
+	TlsServerCerts string   `json:"tls_server_certs"`
 	RouteByLatency bool     `json:"route_by_latency"`
 	RouteRandomly  bool     `json:"route_randomly"`
 
@@ -141,6 +143,15 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 	if rs.TlsEnabled {
 		clientOpts.TLSConfig = &tls.Config{
 			InsecureSkipVerify: rs.TlsInsecure,
+		}
+
+		if len(rs.TlsServerCerts) > 0 {
+			certPool := x509.NewCertPool()
+			if !certPool.AppendCertsFromPEM([]byte(rs.TlsServerCerts)) {
+				return fmt.Errorf("failed to load PEM server certs")
+			}
+
+			clientOpts.TLSConfig.RootCAs = certPool
 		}
 	}
 
