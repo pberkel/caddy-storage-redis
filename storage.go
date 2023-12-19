@@ -91,10 +91,10 @@ type RedisStorage struct {
 	// `TlsServerCertsPath`. See `x509.CertPool.AppendCertsFromPem` for details.
 	// https://pkg.go.dev/crypto/x509#CertPool.AppendCertsFromPEM
 	TlsServerCertsPEM string `json:"tls_server_certs_pem"`
-	// TlsServerCerts is the path to a file containing a series of PEM encoded
-	// certificates that will be used by the cleint to validate trust in the
-	// Redis server's certificate instead of the system trust store. May not be
-	// specified alongside `TlsServerCertsPem`. See
+	// TlsServerCertsPath is the path to a file containing a series of PEM
+	// encoded certificates that will be used by the client to validate trust in
+	// the Redis server's certificate instead of the system trust store. May not
+	// be specified alongside `TlsServerCertsPem`. See
 	// `x509.CertPool.AppendCertsFromPem` for details.
 	// https://pkg.go.dev/crypto/x509#CertPool.AppendCertsFromPEM
 	TlsServerCertsPath string `json:"tls_server_certs_path"`

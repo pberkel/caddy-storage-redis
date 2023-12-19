@@ -115,6 +115,59 @@ Connecting to Redis servers managed by Sentinal requires both the `failover` fla
 ```
 Failover mode also supports the `route_by_latency` and `route_randomly` cluster configuration parameters.
 
+### Enabling TLS
+
+TLS is disabled by default, and if enabled, accepts any server certificate by default. If TLS is and certificate verification are enabled as in the following example, then the system trust store will be used to validate the server certificate.
+```
+{
+    storage redis {
+        host 127.0.0.01
+        port 6379
+        tls_enabled true
+        tls_insecure false
+    }
+}
+```
+You can also use the `tls_server_certs_pem` option to provide one or more PEM encoded certificates to trust:
+```
+{
+    storage redis {
+        host 127.0.0.01
+        port 6379
+        tls_enabled true
+        tls_insecure false
+        tls_server_certs_pem <<CERTIFICATES
+        -----BEGIN CERTIFICATE-----
+        MIIDnTCCAoWgAwIBAgIBADANBgkqhkiG9w0BAQsFADCBhTEtMCsGA1UELhMkMzZk
+        MWE2MjgtNGZjNi00ZTRkLWJiNDMtZDhlMGNhN2I1OTRiMTEwLwYDVQQDEyhHb29n
+        bGUgQ2xvdWQgTWVtb3J5c3RvcmUgUmVkaXMgU2VydmVyIENBMRQwEgYDVQQKEwtH
+        b29nbGUsIEluYzELMAkGA1UEBhMCVVMwHhcNMjMxMjE1MjM0MDMyWhcNMzMxMjEy
+        MjM0MTMyWjCBhTEtMCsGA1UELhMkMzZkMWE2MjgtNGZjNi00ZTRkLWJiNDMtZDhl
+        MGNhN2I1OTRiMTEwLwYDVQQDEyhHb29nbGUgQ2xvdWQgTWVtb3J5c3RvcmUgUmVk
+        aXMgU2VydmVyIENBMRQwEgYDVQQKEwtHb29nbGUsIEluYzELMAkGA1UEBhMCVVMw
+        ggEiMA0GCSqGSIb3DQEBAQUAA4IBDwAwggEKAoIBAQCF54WBXJ8kTAj7e843XriG
+        oXntUoQBP+TdmzBdgW/t9xqi9di7I6zbyl86x+aOENU8xgHQZQxQ/uE0cnJeaMuH
+        H7smyiSn77IP+JL3icDk8a8QIJxYmv3ze47a5ZbfJ4VPXYk0Kh/1HXMDMguS2e+a
+        PdjhCVZSB1rwgaH6nAIjmoJxdKSiNolm4xeuZPXwzvsuZZXhc+HIOiZMhckxnZfD
+        tZsSYZhg0TgswG1DWP+Nq79Z8SSb+uXHPdOEI2w1YKpcZyh5WuGcarMswRh8E3Kf
+        UC+9JLot5NBZ+oAKqcQ7R55Wxd+8CI0paPqaccbJgXMIA2pSEhiqNMEYSA/9QtV3
+        AgMBAAGjFjAUMBIGA1UdEwEB/wQIMAYBAf8CAQAwDQYJKoZIhvcNAQELBQADggEB
+        ABO7LLHzvGkz/IMAEkEyJlQAOrKZD5qC4jTuICQqm9xV17Ql2SLEdKZzAFrEDLJR
+        by0dWrPconQG7XqLgb22RceBVKzEGsmObI7LZQLo69MUYI4TcRDgAXeng34yUBRo
+        njv+WFAQWNUym4WhUeRceyyOWmzhlC0/zOJPufmVBk6QNmjTfXG2ISCeZhFM0rEb
+        C8amwlD9V3EXFjTAEoYs+9Uv1iYDjlMtMrygrrCFTe61Kcgtzp1jsIjfYmTCyt5S
+        WVCmGu+wdiPFL9/N0peb5/ORGrdEg4n+a+gCHV9LGVfUcFCyfR42+4FunKwE/OMl
+        PaAxpc/KB4nwPitpbsWL8Nw=
+        -----END CERTIFICATE-----
+        -----BEGIN CERTIFICATE-----
+        <another certificate here>
+        -----END CERTIFICATE-----
+        CERTIFICATES
+    }
+}
+```
+If you prefer not to put certificates in your Caddyfile, you can also put the series of PEM certificates into a file and use `tls_server_certs_path` to point Caddy at it.
+
 ## Maintenance
 
 This module has been architected to maintain a hierarchical index of storage items using Redis Sorted Sets to optimize directory listing operations typically used by Caddy.  It is possible for this index structure to become corrupted in the event of an unexpected system crash or loss of power.  If you suspect your Caddy storage has been corrupted, it is possible to repair this index structure from the command line by issuing the following command:
