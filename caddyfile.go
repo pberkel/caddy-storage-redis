@@ -164,6 +164,14 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.Errf("invalid boolean value for 'tls_insecure': %s", configVal[0])
 				}
 				rs.TlsInsecure = tlsInsecureParse
+			case "tls_server_certs_pem":
+				if configVal[0] != "" {
+					rs.TlsServerCertsPEM = configVal[0]
+				}
+			case "tls_server_certs_path":
+				if configVal[0] != "" {
+					rs.TlsServerCertsPath = configVal[0]
+				}
 			case "route_by_latency":
 				routeByLatency, err := strconv.ParseBool(configVal[0])
 				if err != nil {

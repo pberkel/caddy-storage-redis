@@ -3,10 +3,12 @@ package storageredis
 import (
 	"context"
 	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
+	"os"
 	"path"
 	"strconv"
 	"strings"
@@ -63,22 +65,41 @@ const (
 // RedisStorage implements Redis storage plugin functionality for Caddy.
 // It supports connecting to standalone, Cluster, or Sentinal (Failover) Redis servers.
 type RedisStorage struct {
-	ClientType     string   `json:"client_type"`
-	Address        []string `json:"address"`
-	Host           []string `json:"host"`
-	Port           []string `json:"port"`
-	DB             int      `json:"db"`
-	Timeout        string   `json:"timeout"`
-	Username       string   `json:"username"`
-	Password       string   `json:"password"`
-	MasterName     string   `json:"master_name"`
-	KeyPrefix      string   `json:"key_prefix"`
-	EncryptionKey  string   `json:"encryption_key"`
-	Compression    bool     `json:"compression"`
-	TlsEnabled     bool     `json:"tls_enabled"`
-	TlsInsecure    bool     `json:"tls_insecure"`
-	RouteByLatency bool     `json:"route_by_latency"`
-	RouteRandomly  bool     `json:"route_randomly"`
+	ClientType    string   `json:"client_type"`
+	Address       []string `json:"address"`
+	Host          []string `json:"host"`
+	Port          []string `json:"port"`
+	DB            int      `json:"db"`
+	Timeout       string   `json:"timeout"`
+	Username      string   `json:"username"`
+	Password      string   `json:"password"`
+	MasterName    string   `json:"master_name"`
+	KeyPrefix     string   `json:"key_prefix"`
+	EncryptionKey string   `json:"encryption_key"`
+	Compression   bool     `json:"compression"`
+	// TlsEnabled controls whether TLS will be used to connect to the Redis
+	// server. False by default.
+	TlsEnabled bool `json:"tls_enabled"`
+	// TlsInsecure controls whether the client will verify the server
+	// certificate. See `InsecureSkipVerify` in `tls.Config` for details. True
+	// by default.
+	// https://pkg.go.dev/crypto/tls#Config
+	TlsInsecure bool `json:"tls_insecure"`
+	// TlsServerCertsPEM is a series of PEM encoded certificates that will be
+	// used by the client to validate trust in the Redis server's certificate
+	// instead of the system trust store. May not be specified alongside
+	// `TlsServerCertsPath`. See `x509.CertPool.AppendCertsFromPem` for details.
+	// https://pkg.go.dev/crypto/x509#CertPool.AppendCertsFromPEM
+	TlsServerCertsPEM string `json:"tls_server_certs_pem"`
+	// TlsServerCertsPath is the path to a file containing a series of PEM
+	// encoded certificates that will be used by the client to validate trust in
+	// the Redis server's certificate instead of the system trust store. May not
+	// be specified alongside `TlsServerCertsPem`. See
+	// `x509.CertPool.AppendCertsFromPem` for details.
+	// https://pkg.go.dev/crypto/x509#CertPool.AppendCertsFromPEM
+	TlsServerCertsPath string `json:"tls_server_certs_path"`
+	RouteByLatency     bool   `json:"route_by_latency"`
+	RouteRandomly      bool   `json:"route_randomly"`
 
 	client redis.UniversalClient
 	locker *redislock.Client
@@ -141,6 +162,29 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 	if rs.TlsEnabled {
 		clientOpts.TLSConfig = &tls.Config{
 			InsecureSkipVerify: rs.TlsInsecure,
+		}
+
+		if len(rs.TlsServerCertsPEM) > 0 && len(rs.TlsServerCertsPath) > 0 {
+			return fmt.Errorf("Cannot specify TlsServerCertsPEM alongside TlsServerCertsPath")
+		}
+
+		if len(rs.TlsServerCertsPEM) > 0 || len(rs.TlsServerCertsPath) > 0 {
+			certPool := x509.NewCertPool()
+			pem := []byte(rs.TlsServerCertsPEM)
+
+			if len(rs.TlsServerCertsPath) > 0 {
+				var err error
+				pem, err = os.ReadFile(rs.TlsServerCertsPath)
+				if err != nil {
+					return fmt.Errorf("Failed to load PEM server certs from file %s: %v", rs.TlsServerCertsPath, err)
+				}
+			}
+
+			if !certPool.AppendCertsFromPEM(pem) {
+				return fmt.Errorf("Failed to load PEM server certs")
+			}
+
+			clientOpts.TLSConfig.RootCAs = certPool
 		}
 	}
 
