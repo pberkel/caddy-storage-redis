@@ -48,8 +48,6 @@ func (rs *RedisStorage) CertMagicStorage() (certmagic.Storage, error) {
 
 func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 
-	repl := caddy.NewReplacer()
-
 	for d.Next() {
 
 		// Optional Redis client type either "cluster" or "failover"
@@ -63,17 +61,16 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 		}
 
 		for nesting := d.Nesting(); d.NextBlock(nesting); {
-
 			configKey := d.Val()
 			var configVal []string
 
 			if d.NextArg() {
 				// configuration item with single parameter
-				configVal = append(configVal, repl.ReplaceAll(d.Val(), ""))
+				configVal = append(configVal, d.Val())
 			} else {
 				// configuration item with nested parameter list
 				for nesting := d.Nesting(); d.NextBlock(nesting); {
-					configVal = append(configVal, repl.ReplaceAll(d.Val(), ""))
+					configVal = append(configVal, d.Val())
 				}
 			}
 
@@ -206,6 +203,35 @@ func (rs *RedisStorage) Provision(ctx caddy.Context) error {
 }
 
 func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
+
+	repl := caddy.NewReplacer()
+
+	for idx, v := range rs.Address {
+		rs.Address[idx] = repl.ReplaceAll(v, "")
+	}
+	for idx, v := range rs.Host {
+		rs.Host[idx] = repl.ReplaceAll(v, "")
+	}
+	for idx, v := range rs.Port {
+		rs.Port[idx] = repl.ReplaceAll(v, "")
+	}
+	rs.MasterName = repl.ReplaceAll(rs.MasterName, "")
+	rs.Username = repl.ReplaceAll(rs.Username, DefaultRedisUsername)
+	rs.Password = repl.ReplaceAll(rs.Password, DefaultRedisPassword)
+	rs.MasterName = repl.ReplaceAll(rs.MasterName, "")
+	rs.KeyPrefix = repl.ReplaceAll(rs.KeyPrefix, DefaultKeyPrefix)
+	rs.EncryptionKey = repl.ReplaceAll(rs.EncryptionKey, "")
+
+	rs.TlsServerCertsPEM = repl.ReplaceAll(rs.TlsServerCertsPEM, "")
+	rs.TlsServerCertsPath = repl.ReplaceAll(rs.TlsServerCertsPath, "")
+
+	// TODO:
+	// rs.Timeout
+	// rs.Compression
+	// rs.TlsEnabled
+	// rs.TlsInsecure
+	// rs.RouteByLatency
+	// rs.RouteRandomly
 
 	// Construct Address from Host and Port if not explicitly provided
 	if len(rs.Address) == 0 {
