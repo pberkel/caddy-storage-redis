@@ -76,13 +76,8 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 
 			switch configKey {
 			case "address":
-				for _, val := range configVal {
-					host, port, err := net.SplitHostPort(val)
-					if err != nil {
-						return d.Errf("invalid address: %s", val)
-					}
-					rs.Address = append(rs.Address, net.JoinHostPort(host, port))
-				}
+
+				rs.Address = configVal
 			case "host":
 				// Reset Host to override defaults
 				rs.Host = []string{}
@@ -101,10 +96,6 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				}
 				rs.DB = dbParse
 			case "timeout":
-				timeParse, err := strconv.Atoi(configVal[0])
-				if err != nil || timeParse < 0 {
-					return d.Errf("invalid timeout value: %s", configVal[0])
-				}
 				rs.Timeout = configVal[0]
 			case "username":
 				if configVal[0] != "" {
@@ -123,16 +114,7 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					rs.KeyPrefix = configVal[0]
 				}
 			case "encryption_key", "aes_key":
-				// Encryption_key length must be at least 32 characters
-				if len(configVal[0]) < 32 {
-					return d.Errf("invalid length for 'encryption_key', must contain at least 32 bytes: %s", configVal[0])
-				}
-				// Truncate keys that are too long
-				if len(configVal[0]) > 32 {
-					rs.EncryptionKey = configVal[0][:32]
-				} else {
-					rs.EncryptionKey = configVal[0]
-				}
+				rs.EncryptionKey = configVal[0]
 			case "compression":
 				Compression, err := strconv.ParseBool(configVal[0])
 				if err != nil {
@@ -197,7 +179,11 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 	repl := caddy.NewReplacer()
 
 	for idx, v := range rs.Address {
-		rs.Address[idx] = repl.ReplaceAll(v, "")
+		host, port, err := net.SplitHostPort(v)
+		if err != nil {
+			return fmt.Errorf("invalid address: %s", v)
+		}
+		rs.Address[idx] = net.JoinHostPort(host, port)
 	}
 	for idx, v := range rs.Host {
 		rs.Host[idx] = repl.ReplaceAll(v, "")
@@ -231,8 +217,12 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 	rs.TlsServerCertsPEM = repl.ReplaceAll(rs.TlsServerCertsPEM, "")
 	rs.TlsServerCertsPath = repl.ReplaceAll(rs.TlsServerCertsPath, "")
 
-	// TODO:
-	// rs.Timeout
+	timeParse, err := strconv.Atoi(rs.Timeout)
+	if err != nil || timeParse < 0 {
+		return fmt.Errorf("invalid timeout value: %s", rs.Timeout)
+	}
+
+	// TODO: these are non-string fields so they can't easily be substituted at runtime :(
 	// rs.Compression
 	// rs.TlsEnabled
 	// rs.TlsInsecure
