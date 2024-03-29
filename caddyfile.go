@@ -87,11 +87,7 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				// Reset Host to override defaults
 				rs.Host = []string{}
 				for _, val := range configVal {
-					addr := net.ParseIP(val)
-					_, err := net.LookupHost(val)
-					if addr == nil && err != nil {
-						return d.Errf("invalid host value: %s", val)
-					}
+
 					rs.Host = append(rs.Host, val)
 				}
 			case "port":
@@ -211,6 +207,11 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 	}
 	for idx, v := range rs.Host {
 		rs.Host[idx] = repl.ReplaceAll(v, "")
+		addr := net.ParseIP(v)
+		_, err := net.LookupHost(v)
+		if addr == nil && err != nil {
+			return fmt.Errorf("invalid host value: %s", v)
+		}
 	}
 	for idx, v := range rs.Port {
 		rs.Port[idx] = repl.ReplaceAll(v, "")
