@@ -92,14 +92,8 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				}
 			case "port":
 				// Reset Port to override defaults
-				rs.Port = []string{}
-				for _, val := range configVal {
-					_, err := strconv.Atoi(val)
-					if err != nil {
-						return d.Errf("invalid port value: %s", val)
-					}
-					rs.Port = append(rs.Port, val)
-				}
+				rs.Port = configVal
+
 			case "db":
 				dbParse, err := strconv.Atoi(configVal[0])
 				if err != nil {
@@ -214,6 +208,10 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 		}
 	}
 	for idx, v := range rs.Port {
+		_, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("invalid port value: %s", v)
+		}
 		rs.Port[idx] = repl.ReplaceAll(v, "")
 	}
 	rs.MasterName = repl.ReplaceAll(rs.MasterName, "")
