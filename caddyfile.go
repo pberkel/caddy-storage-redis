@@ -186,7 +186,7 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 		rs.Address[idx] = net.JoinHostPort(host, port)
 	}
 	for idx, v := range rs.Host {
-		v = repl.ReplaceAll(v, "")
+		v = repl.ReplaceAll(v, DefaultRedisHost)
 		addr := net.ParseIP(v)
 		_, err := net.LookupHost(v)
 		if addr == nil && err != nil {
@@ -195,7 +195,7 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 		rs.Host[idx] = v
 	}
 	for idx, v := range rs.Port {
-		v = repl.ReplaceAll(v, "")
+		v = repl.ReplaceAll(v, DefaultRedisPort)
 		_, err := strconv.Atoi(v)
 		if err != nil {
 			return fmt.Errorf("invalid port value: %s", v)
@@ -203,8 +203,8 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 		rs.Port[idx] = v
 	}
 	rs.MasterName = repl.ReplaceAll(rs.MasterName, "")
-	rs.Username = repl.ReplaceAll(rs.Username, DefaultRedisUsername)
-	rs.Password = repl.ReplaceAll(rs.Password, DefaultRedisPassword)
+	rs.Username = repl.ReplaceAll(rs.Username, "")
+	rs.Password = repl.ReplaceAll(rs.Password, "")
 	rs.MasterName = repl.ReplaceAll(rs.MasterName, "")
 	rs.KeyPrefix = repl.ReplaceAll(rs.KeyPrefix, DefaultKeyPrefix)
 	if len(rs.EncryptionKey) > 0 {
