@@ -49,9 +49,9 @@ The module supports [environment variable substitution](https://caddyserver.com/
 ```
 {
     storage redis {
-        username       "{env.REDIS_USERNAME}"
-        password       "{env.REDIS_PASSWORD}"
-        encryption_key "{env.REDIS_ENCRYPTION_KEY}"
+        username       "{$REDIS_USERNAME}"
+        password       "{$REDIS_PASSWORD}"
+        encryption_key "{$REDIS_ENCRYPTION_KEY}"
         compression    true
     }
 }
