@@ -207,13 +207,15 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 	rs.Password = repl.ReplaceAll(rs.Password, DefaultRedisPassword)
 	rs.MasterName = repl.ReplaceAll(rs.MasterName, "")
 	rs.KeyPrefix = repl.ReplaceAll(rs.KeyPrefix, DefaultKeyPrefix)
-	rs.EncryptionKey = repl.ReplaceAll(rs.EncryptionKey, "")
-	// Encryption_key length must be at least 32 characters
-	if len(rs.EncryptionKey) < 32 {
-		return fmt.Errorf("invalid length for 'encryption_key', must contain at least 32 bytes: %s", rs.EncryptionKey)
-	}
-	if len(rs.EncryptionKey) > 32 {
-		rs.EncryptionKey = rs.EncryptionKey[:32]
+	if len(rs.EncryptionKey) > 0 {
+		rs.EncryptionKey = repl.ReplaceAll(rs.EncryptionKey, "")
+		// Encryption_key length must be at least 32 characters
+		if len(rs.EncryptionKey) < 32 {
+			return fmt.Errorf("invalid length for 'encryption_key', must contain at least 32 bytes: %s", rs.EncryptionKey)
+		}
+		if len(rs.EncryptionKey) > 32 {
+			rs.EncryptionKey = rs.EncryptionKey[:32]
+		}
 	}
 
 	rs.TlsServerCertsPEM = repl.ReplaceAll(rs.TlsServerCertsPEM, "")
