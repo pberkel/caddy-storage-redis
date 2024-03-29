@@ -186,19 +186,21 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 		rs.Address[idx] = net.JoinHostPort(host, port)
 	}
 	for idx, v := range rs.Host {
-		rs.Host[idx] = repl.ReplaceAll(v, "")
+		v = repl.ReplaceAll(v, "")
 		addr := net.ParseIP(v)
 		_, err := net.LookupHost(v)
 		if addr == nil && err != nil {
 			return fmt.Errorf("invalid host value: %s", v)
 		}
+		rs.Host[idx] = v
 	}
 	for idx, v := range rs.Port {
+		v = repl.ReplaceAll(v, "")
 		_, err := strconv.Atoi(v)
 		if err != nil {
 			return fmt.Errorf("invalid port value: %s", v)
 		}
-		rs.Port[idx] = repl.ReplaceAll(v, "")
+		rs.Port[idx] = v
 	}
 	rs.MasterName = repl.ReplaceAll(rs.MasterName, "")
 	rs.Username = repl.ReplaceAll(rs.Username, DefaultRedisUsername)
