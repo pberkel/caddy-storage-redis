@@ -186,7 +186,7 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 		rs.Address[idx] = net.JoinHostPort(host, port)
 	}
 	for idx, v := range rs.Host {
-		v = repl.ReplaceAll(v, DefaultRedisHost)
+		v = repl.ReplaceAll(v, defaultHost)
 		addr := net.ParseIP(v)
 		_, err := net.LookupHost(v)
 		if addr == nil && err != nil {
@@ -195,7 +195,7 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 		rs.Host[idx] = v
 	}
 	for idx, v := range rs.Port {
-		v = repl.ReplaceAll(v, DefaultRedisPort)
+		v = repl.ReplaceAll(v, defaultPort)
 		_, err := strconv.Atoi(v)
 		if err != nil {
 			return fmt.Errorf("invalid port value: %s", v)
@@ -206,7 +206,7 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 	rs.Username = repl.ReplaceAll(rs.Username, "")
 	rs.Password = repl.ReplaceAll(rs.Password, "")
 	rs.MasterName = repl.ReplaceAll(rs.MasterName, "")
-	rs.KeyPrefix = repl.ReplaceAll(rs.KeyPrefix, DefaultKeyPrefix)
+	rs.KeyPrefix = repl.ReplaceAll(rs.KeyPrefix, defaultKeyPrefix)
 	if len(rs.EncryptionKey) > 0 {
 		rs.EncryptionKey = repl.ReplaceAll(rs.EncryptionKey, "")
 		// Encryption_key length must be at least 32 characters
