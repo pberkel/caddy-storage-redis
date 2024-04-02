@@ -48,8 +48,6 @@ func (rs *RedisStorage) CertMagicStorage() (certmagic.Storage, error) {
 
 func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 
-	repl := caddy.NewReplacer()
-
 	for d.Next() {
 
 		// Optional Redis client type either "cluster" or "failover"
@@ -63,50 +61,34 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 		}
 
 		for nesting := d.Nesting(); d.NextBlock(nesting); {
-
 			configKey := d.Val()
 			var configVal []string
 
 			if d.NextArg() {
 				// configuration item with single parameter
-				configVal = append(configVal, repl.ReplaceAll(d.Val(), ""))
+				configVal = append(configVal, d.Val())
 			} else {
 				// configuration item with nested parameter list
 				for nesting := d.Nesting(); d.NextBlock(nesting); {
-					configVal = append(configVal, repl.ReplaceAll(d.Val(), ""))
+					configVal = append(configVal, d.Val())
 				}
 			}
 
 			switch configKey {
 			case "address":
-				for _, val := range configVal {
-					host, port, err := net.SplitHostPort(val)
-					if err != nil {
-						return d.Errf("invalid address: %s", val)
-					}
-					rs.Address = append(rs.Address, net.JoinHostPort(host, port))
-				}
+
+				rs.Address = configVal
 			case "host":
 				// Reset Host to override defaults
 				rs.Host = []string{}
 				for _, val := range configVal {
-					addr := net.ParseIP(val)
-					_, err := net.LookupHost(val)
-					if addr == nil && err != nil {
-						return d.Errf("invalid host value: %s", val)
-					}
+
 					rs.Host = append(rs.Host, val)
 				}
 			case "port":
 				// Reset Port to override defaults
-				rs.Port = []string{}
-				for _, val := range configVal {
-					_, err := strconv.Atoi(val)
-					if err != nil {
-						return d.Errf("invalid port value: %s", val)
-					}
-					rs.Port = append(rs.Port, val)
-				}
+				rs.Port = configVal
+
 			case "db":
 				dbParse, err := strconv.Atoi(configVal[0])
 				if err != nil {
@@ -114,10 +96,6 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				}
 				rs.DB = dbParse
 			case "timeout":
-				timeParse, err := strconv.Atoi(configVal[0])
-				if err != nil || timeParse < 0 {
-					return d.Errf("invalid timeout value: %s", configVal[0])
-				}
 				rs.Timeout = configVal[0]
 			case "username":
 				if configVal[0] != "" {
@@ -136,16 +114,7 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					rs.KeyPrefix = configVal[0]
 				}
 			case "encryption_key", "aes_key":
-				// Encryption_key length must be at least 32 characters
-				if len(configVal[0]) < 32 {
-					return d.Errf("invalid length for 'encryption_key', must contain at least 32 bytes: %s", configVal[0])
-				}
-				// Truncate keys that are too long
-				if len(configVal[0]) > 32 {
-					rs.EncryptionKey = configVal[0][:32]
-				} else {
-					rs.EncryptionKey = configVal[0]
-				}
+				rs.EncryptionKey = configVal[0]
 			case "compression":
 				Compression, err := strconv.ParseBool(configVal[0])
 				if err != nil {
@@ -206,6 +175,63 @@ func (rs *RedisStorage) Provision(ctx caddy.Context) error {
 }
 
 func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
+
+	repl := caddy.NewReplacer()
+
+	for idx, v := range rs.Address {
+		host, port, err := net.SplitHostPort(v)
+		if err != nil {
+			return fmt.Errorf("invalid address: %s", v)
+		}
+		rs.Address[idx] = net.JoinHostPort(host, port)
+	}
+	for idx, v := range rs.Host {
+		v = repl.ReplaceAll(v, defaultHost)
+		addr := net.ParseIP(v)
+		_, err := net.LookupHost(v)
+		if addr == nil && err != nil {
+			return fmt.Errorf("invalid host value: %s", v)
+		}
+		rs.Host[idx] = v
+	}
+	for idx, v := range rs.Port {
+		v = repl.ReplaceAll(v, defaultPort)
+		_, err := strconv.Atoi(v)
+		if err != nil {
+			return fmt.Errorf("invalid port value: %s", v)
+		}
+		rs.Port[idx] = v
+	}
+	rs.MasterName = repl.ReplaceAll(rs.MasterName, "")
+	rs.Username = repl.ReplaceAll(rs.Username, "")
+	rs.Password = repl.ReplaceAll(rs.Password, "")
+	rs.MasterName = repl.ReplaceAll(rs.MasterName, "")
+	rs.KeyPrefix = repl.ReplaceAll(rs.KeyPrefix, defaultKeyPrefix)
+	if len(rs.EncryptionKey) > 0 {
+		rs.EncryptionKey = repl.ReplaceAll(rs.EncryptionKey, "")
+		// Encryption_key length must be at least 32 characters
+		if len(rs.EncryptionKey) < 32 {
+			return fmt.Errorf("invalid length for 'encryption_key', must contain at least 32 bytes: %s", rs.EncryptionKey)
+		}
+		if len(rs.EncryptionKey) > 32 {
+			rs.EncryptionKey = rs.EncryptionKey[:32]
+		}
+	}
+
+	rs.TlsServerCertsPEM = repl.ReplaceAll(rs.TlsServerCertsPEM, "")
+	rs.TlsServerCertsPath = repl.ReplaceAll(rs.TlsServerCertsPath, "")
+
+	timeParse, err := strconv.Atoi(rs.Timeout)
+	if err != nil || timeParse < 0 {
+		return fmt.Errorf("invalid timeout value: %s", rs.Timeout)
+	}
+
+	// TODO: these are non-string fields so they can't easily be substituted at runtime :(
+	// rs.Compression
+	// rs.TlsEnabled
+	// rs.TlsInsecure
+	// rs.RouteByLatency
+	// rs.RouteRandomly
 
 	// Construct Address from Host and Port if not explicitly provided
 	if len(rs.Address) == 0 {
