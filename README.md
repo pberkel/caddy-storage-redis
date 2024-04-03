@@ -57,6 +57,15 @@ The module supports [environment variable substitution](https://caddyserver.com/
 }
 ```
 
+NOTE however the following configuration options do not (yet) support runtime substition:
+
+- db
+- compression
+- tls_enabled
+- tls_insecure
+- route_by_latency
+- route_randomly
+
 ### Cluster mode
 
 Connect to a Redis Cluster by specifying a flag before the main configuration block or by configuring more than one Redis host / address:
