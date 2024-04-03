@@ -49,13 +49,22 @@ The module supports [environment variable substitution](https://caddyserver.com/
 ```
 {
     storage redis {
-        username       "{env.REDIS_USERNAME}"
-        password       "{env.REDIS_PASSWORD}"
-        encryption_key "{env.REDIS_ENCRYPTION_KEY}"
+        username       "{$REDIS_USERNAME}"
+        password       "{$REDIS_PASSWORD}"
+        encryption_key "{$REDIS_ENCRYPTION_KEY}"
         compression    true
     }
 }
 ```
+
+NOTE however the following configuration options do not (yet) support runtime substition:
+
+- db
+- compression
+- tls_enabled
+- tls_insecure
+- route_by_latency
+- route_randomly
 
 ### Cluster mode
 
