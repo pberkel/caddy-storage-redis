@@ -62,20 +62,35 @@ const (
 	lockRefreshInterval = 3 * time.Second
 )
 
-// RedisStorage implements Redis storage plugin functionality for Caddy.
-// It supports connecting to standalone, Cluster, or Sentinal (Failover) Redis servers.
+// RedisStorage implements a Caddy storage backend for Redis
+// It supports Single (Standalone), Cluster, or Sentinal (Failover) Redis server configurations.
 type RedisStorage struct {
+	// ClientType specifies the Redis client type. Valid values are "cluster" or "failover"
 	ClientType    string   `json:"client_type"`
+	// Address The full address of the Redis server. Example: "127.0.0.1:6379"
+	// If not defined, will be generated from Host and Port parameters.
 	Address       []string `json:"address"`
+	// Host The Redis server hostname or IP address. Default: "127.0.0.1"
 	Host          []string `json:"host"`
+	// Host The Redis server port number. Default: "6379"
 	Port          []string `json:"port"`
+	// DB The Redis server database number. Default: 0
 	DB            int      `json:"db"`
+	// Timeout The Redis server timeout in seconds. Default: 5
 	Timeout       string   `json:"timeout"`
+	// Username The username for authenticating with the Redis server. Default: "" (No authentication)
 	Username      string   `json:"username"`
+	// Password The password for authenticating with the Redis server. Default: "" (No authentication)
 	Password      string   `json:"password"`
+	// MasterName Only required when connecting to Redis via Sentinal (Failover mode). Default ""
 	MasterName    string   `json:"master_name"`
+	// KeyPrefix A string prefix that is appended to Redis keys. Default: "caddy"
+	// Useful when the Redis server is used by multiple applications.
 	KeyPrefix     string   `json:"key_prefix"`
+	// EncryptionKey A key string used to symmetrically encrypt and decrypt data stored in Redis.
+	// The key must be exactly 32 characters, longer values will be truncated. Default: "" (No encryption)
 	EncryptionKey string   `json:"encryption_key"`
+	// Compression Specifies whether values should be compressed before storing in Redis. Default: false
 	Compression   bool     `json:"compression"`
 	// TlsEnabled controls whether TLS will be used to connect to the Redis
 	// server. False by default.
@@ -98,7 +113,9 @@ type RedisStorage struct {
 	// `x509.CertPool.AppendCertsFromPem` for details.
 	// https://pkg.go.dev/crypto/x509#CertPool.AppendCertsFromPEM
 	TlsServerCertsPath string `json:"tls_server_certs_path"`
+	// RouteByLatency Route commands by latency, only used in Cluster mode. Default: false
 	RouteByLatency     bool   `json:"route_by_latency"`
+	// RouteRandomly Route commands randomly, only used in Cluster mode. Default: false
 	RouteRandomly      bool   `json:"route_randomly"`
 
 	client redis.UniversalClient
