@@ -263,8 +263,8 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 
 func (rs *RedisStorage) Cleanup() error {
 	// Close the Redis connection
-	if rs.client != nil {
-		rs.client.Close()
+	if rs.Client != nil {
+		rs.Client.Close()
 	}
 
 	return nil

@@ -60,7 +60,7 @@ func provisionRedisStorage(t *testing.T) (*RedisStorage, context.Context) {
 	}
 
 	// Flush the current Redis database
-	err = rs.client.FlushDB(ctx).Err()
+	err = rs.Client.FlushDB(ctx).Err()
 	assert.NoError(t, err)
 
 	return rs, ctx

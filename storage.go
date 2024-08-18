@@ -66,32 +66,32 @@ const (
 // It supports Single (Standalone), Cluster, or Sentinal (Failover) Redis server configurations.
 type RedisStorage struct {
 	// ClientType specifies the Redis client type. Valid values are "cluster" or "failover"
-	ClientType    string   `json:"client_type"`
+	ClientType string `json:"client_type"`
 	// Address The full address of the Redis server. Example: "127.0.0.1:6379"
 	// If not defined, will be generated from Host and Port parameters.
-	Address       []string `json:"address"`
+	Address []string `json:"address"`
 	// Host The Redis server hostname or IP address. Default: "127.0.0.1"
-	Host          []string `json:"host"`
+	Host []string `json:"host"`
 	// Host The Redis server port number. Default: "6379"
-	Port          []string `json:"port"`
+	Port []string `json:"port"`
 	// DB The Redis server database number. Default: 0
-	DB            int      `json:"db"`
+	DB int `json:"db"`
 	// Timeout The Redis server timeout in seconds. Default: 5
-	Timeout       string   `json:"timeout"`
+	Timeout string `json:"timeout"`
 	// Username The username for authenticating with the Redis server. Default: "" (No authentication)
-	Username      string   `json:"username"`
+	Username string `json:"username"`
 	// Password The password for authenticating with the Redis server. Default: "" (No authentication)
-	Password      string   `json:"password"`
+	Password string `json:"password"`
 	// MasterName Only required when connecting to Redis via Sentinal (Failover mode). Default ""
-	MasterName    string   `json:"master_name"`
+	MasterName string `json:"master_name"`
 	// KeyPrefix A string prefix that is appended to Redis keys. Default: "caddy"
 	// Useful when the Redis server is used by multiple applications.
-	KeyPrefix     string   `json:"key_prefix"`
+	KeyPrefix string `json:"key_prefix"`
 	// EncryptionKey A key string used to symmetrically encrypt and decrypt data stored in Redis.
 	// The key must be exactly 32 characters, longer values will be truncated. Default: "" (No encryption)
-	EncryptionKey string   `json:"encryption_key"`
+	EncryptionKey string `json:"encryption_key"`
 	// Compression Specifies whether values should be compressed before storing in Redis. Default: false
-	Compression   bool     `json:"compression"`
+	Compression bool `json:"compression"`
 	// TlsEnabled controls whether TLS will be used to connect to the Redis
 	// server. False by default.
 	TlsEnabled bool `json:"tls_enabled"`
@@ -114,11 +114,12 @@ type RedisStorage struct {
 	// https://pkg.go.dev/crypto/x509#CertPool.AppendCertsFromPEM
 	TlsServerCertsPath string `json:"tls_server_certs_path"`
 	// RouteByLatency Route commands by latency, only used in Cluster mode. Default: false
-	RouteByLatency     bool   `json:"route_by_latency"`
+	RouteByLatency bool `json:"route_by_latency"`
 	// RouteRandomly Route commands randomly, only used in Cluster mode. Default: false
-	RouteRandomly      bool   `json:"route_randomly"`
+	RouteRandomly bool `json:"route_randomly"`
 
-	client redis.UniversalClient
+	Client redis.UniversalClient
+
 	locker *redislock.Client
 	logger *zap.SugaredLogger
 	locks  *sync.Map
@@ -218,7 +219,7 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		rs.client = clusterClient
+		rs.Client = clusterClient
 
 	} else if rs.ClientType == "cluster" || len(clientOpts.Addrs) > 1 {
 
@@ -232,22 +233,22 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
-		rs.client = clusterClient
+		rs.Client = clusterClient
 
 	} else {
 
 		// Create new Redis simple standalone client
-		rs.client = redis.NewClient(clientOpts.Simple())
+		rs.Client = redis.NewClient(clientOpts.Simple())
 
 		// Test connection to the Redis server
-		err := rs.client.Ping(ctx).Err()
+		err := rs.Client.Ping(ctx).Err()
 		if err != nil {
 			return err
 		}
 	}
 
 	// Create new redislock client
-	rs.locker = redislock.New(rs.client)
+	rs.locker = redislock.New(rs.Client)
 	rs.locks = &sync.Map{}
 	return nil
 }
@@ -303,7 +304,7 @@ func (rs RedisStorage) Store(ctx context.Context, key string, value []byte) erro
 	}
 
 	// Store the key value in the Redis database
-	if err := rs.client.Set(ctx, prefixedKey, jsonValue, 0).Err(); err != nil {
+	if err := rs.Client.Set(ctx, prefixedKey, jsonValue, 0).Err(); err != nil {
 		return fmt.Errorf("Unable to set value for %s: %v", key, err)
 	}
 
@@ -350,7 +351,7 @@ func (rs RedisStorage) Delete(ctx context.Context, key string) error {
 		return fmt.Errorf("Unable to delete directory for key %s: %v", key, err)
 	}
 
-	if err := rs.client.Del(ctx, prefixedKey).Err(); err != nil {
+	if err := rs.Client.Del(ctx, prefixedKey).Err(); err != nil {
 		return fmt.Errorf("Unable to delete key %s: %v", key, err)
 	}
 
@@ -360,7 +361,7 @@ func (rs RedisStorage) Delete(ctx context.Context, key string) error {
 func (rs RedisStorage) Exists(ctx context.Context, key string) bool {
 
 	// Redis returns a count of the number of keys found
-	exists := rs.client.Exists(ctx, rs.prefixKey(key)).Val()
+	exists := rs.Client.Exists(ctx, rs.prefixKey(key)).Val()
 
 	return exists > 0
 }
@@ -371,7 +372,7 @@ func (rs RedisStorage) List(ctx context.Context, dir string, recursive bool) ([]
 	var currKey = rs.prefixKey(dir)
 
 	// Obtain range of all direct children stored in the Sorted Set
-	keys, err := rs.client.ZRange(ctx, currKey, 0, -1).Result()
+	keys, err := rs.Client.ZRange(ctx, currKey, 0, -1).Result()
 	if err != nil {
 		return keyList, fmt.Errorf("Unable to get range on sorted set '%s': %v", currKey, err)
 	}
@@ -491,7 +492,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 
 		for {
 			// Scan for keys matching the search query and iterate until all found
-			keys, nextPointer, err := rs.client.Scan(ctx, pointer, currKey+"*", scanCount).Result()
+			keys, nextPointer, err := rs.Client.Scan(ctx, pointer, currKey+"*", scanCount).Result()
 			if err != nil {
 				return fmt.Errorf("Unable to scan path %s: %v", currKey, err)
 			}
@@ -499,7 +500,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 			// Iterate over returned keys
 			for _, key := range keys {
 				// Proceed only if key type is regular string value
-				keyType := rs.client.Type(ctx, key).Val()
+				keyType := rs.Client.Type(ctx, key).Val()
 				if keyType != "string" {
 					continue
 				}
@@ -528,7 +529,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 	}
 
 	// Obtain range of all direct children stored in the Sorted Set
-	keys, err := rs.client.ZRange(ctx, currKey, 0, -1).Result()
+	keys, err := rs.Client.ZRange(ctx, currKey, 0, -1).Result()
 	if err != nil {
 		return fmt.Errorf("Unable to get range on sorted set '%s': %v", currKey, err)
 	}
@@ -543,7 +544,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 
 		// Remove key from set if it does not exist
 		if !rs.Exists(ctx, fullPathKey) {
-			rs.client.ZRem(ctx, currKey, k)
+			rs.Client.ZRem(ctx, currKey, k)
 			rs.logger.Infof("Removed non-existant record '%s' from directory '%s'", k, currKey)
 			continue
 		}
@@ -574,7 +575,7 @@ func (rs *RedisStorage) prefixLock(key string) string {
 
 func (rs RedisStorage) loadStorageData(ctx context.Context, key string) (*StorageData, error) {
 
-	data, err := rs.client.Get(ctx, rs.prefixKey(key)).Bytes()
+	data, err := rs.Client.Get(ctx, rs.prefixKey(key)).Bytes()
 	if data == nil || errors.Is(err, redis.Nil) {
 		return nil, fs.ErrNotExist
 	} else if err != nil {
@@ -600,7 +601,7 @@ func (rs RedisStorage) storeDirectoryRecord(ctx context.Context, key string, sco
 	}
 
 	// Insert "base" value into Set "dir"
-	success, err := rs.client.ZAdd(ctx, dir, redis.Z{Score: score, Member: base}).Result()
+	success, err := rs.Client.ZAdd(ctx, dir, redis.Z{Score: score, Member: base}).Result()
 	if err != nil {
 		return fmt.Errorf("Unable to add %s to Set %s: %v", base, dir, err)
 	}
@@ -628,12 +629,12 @@ func (rs RedisStorage) deleteDirectoryRecord(ctx context.Context, key string, ba
 	}
 
 	// Remove "base" value from Set "dir"
-	if err := rs.client.ZRem(ctx, dir, base).Err(); err != nil {
+	if err := rs.Client.ZRem(ctx, dir, base).Err(); err != nil {
 		return fmt.Errorf("Unable to remove %s from Set %s: %v", base, dir, err)
 	}
 
 	// Check if Set "dir" still exists (removing the last item deletes the set)
-	if exists := rs.client.Exists(ctx, dir).Val(); exists == 0 {
+	if exists := rs.Client.Exists(ctx, dir).Val(); exists == 0 {
 		// Recursively delete parent directory until parent
 		// is not empty (exists > 0) or top level reached
 		rs.deleteDirectoryRecord(ctx, dir, true)
