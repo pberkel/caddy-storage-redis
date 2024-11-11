@@ -343,3 +343,8 @@ func TestRedisStorage_String(t *testing.T) {
 		})
 	})
 }
+
+func TestRedisStorage_GetClient(t *testing.T) {
+	rs, _ := provisionRedisStorage(t)
+	assert.NotNil(t, rs.GetClient())
+}

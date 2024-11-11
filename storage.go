@@ -666,3 +666,12 @@ func (rs RedisStorage) String() string {
 	strVal, _ := json.Marshal(rs)
 	return string(strVal)
 }
+
+// GetClient returns the Redis client initialized by this storage.
+//
+// This is useful for other modules that need to interact with the same Redis instance.
+// The return type of GetClient is "any" for forward-compatibility new versions of go-redis.
+// The returned value must usually be cast to redis.UniversalClient.
+func (rs *RedisStorage) GetClient() any {
+	return rs.client
+}
