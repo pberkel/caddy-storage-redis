@@ -109,16 +109,16 @@ Two optional boolean cluster parameters `route_by_latency` and `route_randomly` 
 
 ### Failover mode (Sentinal)
 
-Connecting to Redis servers managed by Sentinal requires both the `failover` flag and `master_name` to be set:
+Connecting to Redis servers managed by Sentinal requires both the `failover` flag and `master_name` value to be set:
 ```
 {
     storage redis failover {
         address {
-            redis-sentinal-001.example.com:6379
-            redis-sentinal-002.example.com:6379
-            redis-sentinal-003.example.com:6379
+            redis-sentinal-001.example.com:26379
+            redis-sentinal-002.example.com:26379
+            redis-sentinal-003.example.com:26379
         }
-        master_name redis-sentinal-001
+        master_name redis-master-server
     }
 }
 ```
