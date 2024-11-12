@@ -73,6 +73,10 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					configVal = append(configVal, d.Val())
 				}
 			}
+			// There are no valid configurations where configVal slice is empty
+			if len(configVal) == 0 {
+				return d.Errf("no value supplied for configuraton key '%s'", configKey)
+			}
 
 			switch configKey {
 			case "address":
