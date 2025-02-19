@@ -11,7 +11,13 @@ The plugin uses the latest version of the [go-redis/redis](https://github.com/go
 
 ## Upgrading
 
-Previous configuration options are generally compatible except for `CADDY_CLUSTERING_REDIS_*` environment variables, which have been removed.  To configure this Redis Storage module using environment variables, see the example configuration below.
+Previous configuration options are generally compatible except for the following: 
+- `CADDY_CLUSTERING_REDIS_*` environment variables, which have been removed.  To configure this Redis Storage module using environment variables, see the example configuration below.
+- When using the JSON config format directly, be aware of these differences between the old plugin and this plugin:
+  - The `address`, `host`, and `port` config fields are now arrays of strings to allow for clustering. The old format was only a string.
+  - The old plugin had a config field for `value_prefix`, which is not included in this plugin.
+  - The config field `aes_key` is now `encryption_key`.
+  - The `timeout` config field used to accept only an integer, now accepts only a string.
 
 Upgrading to this module from [gamalan/caddy-tlsredis](https://github.com/gamalan/caddy-tlsredis) will require an [export storage](https://caddyserver.com/docs/command-line#caddy-storage) from the previous installation then [import storage](https://caddyserver.com/docs/command-line#caddy-storage) into a new Caddy server instance running this module.  The default `key_prefix` has been changed from `caddytls` to `caddy` to provide a simpler migration path so keys stored by the [gamalan/caddy-tlsredis](https://github.com/gamalan/caddy-tlsredis) plugin and this module can co-exist in the same Redis database.
 
@@ -44,6 +50,50 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
 }
 ```
 Note that `host` and `port` values can be configured (or accept the defaults) OR an `address` value can be specified, which will override the `host` and `port` values.
+
+Here's the same config as above, but in JSON format (which Caddy parses all configs into under the hood):
+```
+{
+    "storage": {
+        "address": [
+            "127.0.0.1:6379"
+        ],
+        "client_type": "simple",
+        "compression": false,
+        "db": 0,
+        "encryption_key": "",
+        "host": [
+            "127.0.0.1"
+        ],
+        "key_prefix": "caddy",
+        "master_name": "",
+        "module": "redis",
+        "password": "",
+        "port": [
+            "6379"
+        ],
+        "route_by_latency": false,
+        "route_randomly": false,
+        "timeout": "5",
+        "tls_enabled": false,
+        "tls_insecure": true,
+        "tls_server_certs_path": "",
+        "tls_server_certs_pem": "",
+        "username": ""
+    },
+    "apps": {
+        "http": {
+            "servers": {
+                "srv0": {
+                    "listen": [
+                        ":443"
+                    ]
+                }
+            }
+        }
+    }
+}
+```
 
 The module supports [environment variable substitution](https://caddyserver.com/docs/caddyfile/concepts#environment-variables) within Caddyfile parameters:
 ```
