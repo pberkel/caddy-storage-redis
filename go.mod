@@ -1,4 +1,4 @@
-module github.com/pberkel/caddy-storage-redis
+module github.com/cruizba/caddy-storage-redis
 
 go 1.23.0
 
