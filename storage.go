@@ -120,9 +120,6 @@ type RedisStorage struct {
 	// RouteRandomly Route commands randomly, only used in Cluster mode. Default: false
 	RouteRandomly      bool   `json:"route_randomly"`
 
-
-
-
 	client redis.UniversalClient
 	locker *redislock.Client
 	logger *zap.SugaredLogger
