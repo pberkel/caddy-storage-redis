@@ -82,7 +82,7 @@ type RedisStorage struct {
 	Username      string   `json:"username"`
 	// Password The password for authenticating with the Redis server. Default: "" (No authentication)
 	Password      string   `json:"password"`
-	// MasterName Only required when connecting to Redis via Sentinal (Failover mode). Default ""
+	// PasswordSentinal Optional password needed if redis sentinals requires authentication.
 	PasswordSentinal string `json:"password_sentinal"`
 	// MasterName Only required when connecting to Redis via Sentinal (Failover mode). Default ""
 	MasterName    string   `json:"master_name"`
