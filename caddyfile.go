@@ -101,9 +101,9 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if configVal[0] != "" {
 					rs.Password = configVal[0]
 				}
-			case "password_sentinal":
+			case "sentinel_password":
 				if configVal[0] != "" {
-					rs.PasswordSentinal = configVal[0]
+					rs.SentinalPassword = configVal[0]
 				}
 			case "master_name":
 				if configVal[0] != "" {

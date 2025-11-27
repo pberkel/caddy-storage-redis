@@ -82,8 +82,8 @@ type RedisStorage struct {
 	Username      string   `json:"username"`
 	// Password The password for authenticating with the Redis server. Default: "" (No authentication)
 	Password      string   `json:"password"`
-	// PasswordSentinal Optional password needed if redis sentinals requires authentication.
-	PasswordSentinal string `json:"password_sentinal"`
+	// SentinelPassword Optional The Redis sentinel password if authentication is enabled.
+	SentinelPassword string `json:"sentinel_password"`
 	// MasterName Only required when connecting to Redis via Sentinal (Failover mode). Default ""
 	MasterName    string   `json:"master_name"`
 	// KeyPrefix A string prefix that is appended to Redis keys. Default: "caddy"
@@ -210,8 +210,8 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 	// Create appropriate Redis client type
 	if rs.ClientType == "failover" && clientOpts.MasterName != "" {
 
-		if rs.PasswordSentinal != "" {
-			clientOpts.SentinelPassword = rs.PasswordSentinal
+		if rs.SentinelPassword != "" {
+			clientOpts.SentinelPassword = rs.SentinelPassword
 		}
 
 		// Create new Redis Failover Cluster client
