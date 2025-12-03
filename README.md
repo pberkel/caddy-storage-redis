@@ -174,6 +174,8 @@ Connecting to Redis servers managed by Sentinal requires both the `failover` fla
 ```
 Failover mode also supports the `route_by_latency` and `route_randomly` cluster configuration parameters.
 
+Optionally, if your Sentinel servers require authentication, you can specify the `sentinel_password` parameter.
+
 ### Enabling TLS
 
 TLS is disabled by default, and if enabled, accepts any server certificate by default. If TLS is and certificate verification are enabled as in the following example, then the system trust store will be used to validate the server certificate.
