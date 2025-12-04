@@ -287,7 +287,7 @@ func cmdRedisStorageRepair(fl caddycmd.Flags) (int, error) {
 	configFile := fl.String("config")
 
 	// Load configuration file (if not specified, will look in usual locations)
-	cfg, _, err := caddycmd.LoadConfig(configFile, "")
+	cfg, _, _, err := caddycmd.LoadConfig(configFile, "")
 	if err != nil {
 		return caddy.ExitCodeFailedStartup, fmt.Errorf("Unable to load config file: %v", err)
 	}
