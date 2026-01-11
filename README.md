@@ -52,7 +52,7 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
 Note that `host` and `port` values can be configured (or accept the defaults) OR an `address` value can be specified, which will override the `host` and `port` values.
 
 Here's the same config as above, but in JSON format (which Caddy parses all configs into under the hood):
-```
+```json
 {
     "storage": {
         "address": [
