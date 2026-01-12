@@ -11,13 +11,13 @@ The plugin uses the latest version of the [go-redis/redis](https://github.com/go
 
 ## Upgrading
 
-Previous configuration options are generally compatible except for the following: 
-- `CADDY_CLUSTERING_REDIS_*` environment variables, which have been removed.  To configure this Redis Storage module using environment variables, see the example configuration below.
+Previous configuration options from [gamalan/caddy-tlsredis](https://github.com/gamalan/caddy-tlsredis) are generally compatible except the following:
+- `CADDY_CLUSTERING_REDIS_*` environment variables have been removed. See the  below configuration example to configure this module using environment variables.
 - When using the JSON config format directly, be aware of these differences between the old plugin and this plugin:
   - The `address`, `host`, and `port` config fields are now arrays of strings to allow for clustering. The old format was only a string.
-  - The old plugin had a config field for `value_prefix`, which is not included in this plugin.
-  - The config field `aes_key` is now `encryption_key`.
-  - The `timeout` config field used to accept only an integer, now accepts only a string.
+  - The old plugin had a config field for `value_prefix`, which has been depricated and is not included in this plugin.
+  - The config field `aes_key` is now named `encryption_key`.
+  - The `timeout` config field used to accept only an integer however now accepts only a string.
 
 Upgrading to this module from [gamalan/caddy-tlsredis](https://github.com/gamalan/caddy-tlsredis) will require an [export storage](https://caddyserver.com/docs/command-line#caddy-storage) from the previous installation then [import storage](https://caddyserver.com/docs/command-line#caddy-storage) into a new Caddy server instance running this module.  The default `key_prefix` has been changed from `caddytls` to `caddy` to provide a simpler migration path so keys stored by the [gamalan/caddy-tlsredis](https://github.com/gamalan/caddy-tlsredis) plugin and this module can co-exist in the same Redis database.
 
