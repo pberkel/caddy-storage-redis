@@ -1,3 +1,16 @@
+# v1.6.0 (2026-02-24)
+
+This version adds support for Caddy Server 2.11.1 which introduced a breaking change
+to the return parameters of function caddycmd.LoadConfig() which is used by this module.
+
+Several important module dependancies were updated for security reasons in this release:
+ - github.com/redis/go-redis from v9.3.0 to v9.18
+ - github.com/spf13/cobra from v1.7.0 to v1.10.2
+ - github.com/stretchr/testify from v1.9.0 to v1.11.1
+ - go.uber.org/zap from v1.25.0 to v1.27.1
+
+As well as many indirect dependancy upgrades resulting from the above changes.
+
 # v1.5.0 (2025-12-11)
 
 This version adds support for authenticating with Redis Sentinel servers by 

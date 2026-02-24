@@ -9,6 +9,20 @@ This is comprehensive rewrite of the [gamalan/caddy-tlsredis](https://github.com
 
 The plugin uses the latest version of the [go-redis/redis](https://github.com/go-redis/redis) client and [redislock](https://github.com/bsm/redislock) for the locking mechanism. See [distlock](https://redis.io/topics/distlock) for more information on the lock algorithm.
 
+## Build Instructions
+
+To build this module with Caddy Server v2.10.2 and older you must use the v1.5.x release:
+
+```
+xcaddy build v2.10.2 --with github.com/pberkel/caddy-storage-redis@v1.5.0
+```
+
+Caddy Server v2.11.1 and newer can be built with the latest version of this module:
+
+```
+xcaddy build --with github.com/pberkel/caddy-storage-redis
+```
+
 ## Upgrading
 
 Previous configuration options from [gamalan/caddy-tlsredis](https://github.com/gamalan/caddy-tlsredis) are generally compatible except the following:
