@@ -273,10 +273,10 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 
 func normalizeKeyPrefix(prefix string) (string, error) {
 	p := strings.TrimSpace(prefix)
-	p = strings.Trim(p, "/")
+	p = strings.Trim(p, keyPathSeparator)
 	if p != "" {
 		// Malformed prefixes might cause problems for path.Join() later
-		for segment := range strings.SplitSeq(p, "/") {
+		for segment := range strings.SplitSeq(p, keyPathSeparator) {
 			if segment == "" || segment == "." || segment == ".." {
 				return "", fmt.Errorf("invalid key_prefix segment: %q", segment)
 			}

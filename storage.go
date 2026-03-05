@@ -37,6 +37,9 @@ const (
 	// Prepended to every Redis key
 	defaultKeyPrefix = "caddy"
 
+	// Separator for Redis key path segments
+	keyPathSeparator = "/"
+
 	// Compress values before storing
 	defaultCompression = false
 
@@ -411,7 +414,7 @@ func (rs RedisStorage) List(ctx context.Context, dir string, recursive bool) ([]
 	// Iterate over each child key
 	for _, k := range keys {
 		// Directory keys will have a "/" suffix
-		trimmedKey := strings.TrimSuffix(k, "/")
+		trimmedKey := strings.TrimSuffix(k, keyPathSeparator)
 		// Reconstruct the full path of child key
 		fullPathKey := path.Join(dir, trimmedKey)
 		// If current key is a directory
@@ -575,7 +578,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 	// Iterate over each child key
 	for _, k := range keys {
 		// Directory keys will have a "/" suffix
-		trimmedKey := strings.TrimSuffix(k, "/")
+		trimmedKey := strings.TrimSuffix(k, keyPathSeparator)
 
 		// Reconstruct the full path of child key
 		fullPathKey := path.Join(dir, trimmedKey)
@@ -606,7 +609,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 }
 
 func (rs *RedisStorage) trimKey(key string) string {
-	return strings.TrimPrefix(strings.TrimPrefix(key, rs.KeyPrefix), "/")
+	return strings.TrimPrefix(strings.TrimPrefix(key, rs.KeyPrefix), keyPathSeparator)
 }
 
 func (rs *RedisStorage) prefixKey(key string) string {
@@ -702,7 +705,7 @@ func (rs RedisStorage) splitDirectoryKey(key string, baseIsDir bool) (string, st
 
 	// Append slash to indicate directory
 	if baseIsDir {
-		base = base + "/"
+		base = base + keyPathSeparator
 	}
 
 	return dir, base
