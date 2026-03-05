@@ -1,5 +1,7 @@
 .env
+.gocache
 .idea
 .vscode
 caddy
+caddy.tar
 Caddyfile

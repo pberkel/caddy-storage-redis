@@ -51,11 +51,11 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
         password       ""
         db             0
         timeout        5
-        key_prefix     "caddy"
-        encryption_key ""    // default no encryption; enable by specifying a secret key containing 32 characters (longer keys will be truncated)
-        compression    false // default no compression; if set to true, stored values are compressed using "compress/flate"
+        key_prefix     "caddy" // should not contain any leading or trailing '/' characters nor '.' or '..' path segments
+        encryption_key ""      // default no encryption; enable by specifying a secret key containing 32 characters (longer keys will be truncated)
+        compression    false   // default no compression; if set to true, stored values are compressed using "compress/flate"
         tls_enabled    false
-        tls_insecure   true
+        tls_insecure   false
     }
 }
 
@@ -90,7 +90,7 @@ Here's the same config as above, but in JSON format (which Caddy parses all conf
         "route_randomly": false,
         "timeout": "5",
         "tls_enabled": false,
-        "tls_insecure": true,
+        "tls_insecure": false,
         "tls_server_certs_path": "",
         "tls_server_certs_pem": "",
         "username": ""
@@ -192,14 +192,14 @@ Optionally, if your Sentinel servers require authentication, you can specify the
 
 ### Enabling TLS
 
-TLS is disabled by default, and if enabled, accepts any server certificate by default. If TLS is and certificate verification are enabled as in the following example, then the system trust store will be used to validate the server certificate.
+TLS connections to the Redis server is disabled by default. Since v1.7 certificate verification is enabled by default and will use the system trust store to validate the Redis server certificate (Prior to v1.7 certificate verification was disabled by default).  For instances where TLS is required but the Redis server does not have a verifiable certificate, use the following configuration:
 ```
 {
     storage redis {
         host 127.0.0.01
         port 6379
         tls_enabled true
-        tls_insecure false
+        tls_insecure true
     }
 }
 ```

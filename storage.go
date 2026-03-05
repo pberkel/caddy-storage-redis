@@ -43,8 +43,8 @@ const (
 	// Connect to Redis via TLS
 	defaultTLS = false
 
-	// Do not verify TLS cerficate
-	defaultTLSInsecure = true
+	// Always verify TLS cerficate
+	defaultTLSInsecure = false
 
 	// Routing option for cluster client
 	defaultRouteByLatency = false
@@ -98,7 +98,7 @@ type RedisStorage struct {
 	// server. False by default.
 	TlsEnabled bool `json:"tls_enabled"`
 	// TlsInsecure controls whether the client will verify the server
-	// certificate. See `InsecureSkipVerify` in `tls.Config` for details. True
+	// certificate. See `InsecureSkipVerify` in `tls.Config` for details. False
 	// by default.
 	// https://pkg.go.dev/crypto/tls#Config
 	TlsInsecure bool `json:"tls_insecure"`
@@ -124,6 +124,11 @@ type RedisStorage struct {
 	locker *redislock.Client
 	logger *zap.SugaredLogger
 	locks  *sync.Map
+}
+
+type heldLock struct {
+	lock   *redislock.Lock
+	cancel context.CancelFunc
 }
 
 type StorageData struct {
@@ -364,11 +369,32 @@ func (rs RedisStorage) Delete(ctx context.Context, key string) error {
 }
 
 func (rs RedisStorage) Exists(ctx context.Context, key string) bool {
+	exists, err := rs.existsWithErrorUnprefixed(ctx, key)
+	if err != nil {
+		// CertMagic interface requires a boolean return only.
+		if rs.logger != nil {
+			rs.logger.Warnw("Exists check failed", "key", key, "error", err)
+		}
+		return false
+	}
+	return exists
+}
 
+func (rs RedisStorage) existsWithErrorUnprefixed(ctx context.Context, key string) (bool, error) {
 	// Redis returns a count of the number of keys found
-	exists := rs.client.Exists(ctx, rs.prefixKey(key)).Val()
+	exists, err := rs.existsWithError(ctx, rs.prefixKey(key))
+	if err != nil {
+		return false, fmt.Errorf("Unable to check existence for %s: %v", key, err)
+	}
+	return exists, nil
+}
 
-	return exists > 0
+func (rs RedisStorage) existsWithError(ctx context.Context, redisKey string) (bool, error) {
+	existsCount, err := rs.client.Exists(ctx, redisKey).Result()
+	if err != nil {
+		return false, err
+	}
+	return existsCount > 0, nil
 }
 
 func (rs RedisStorage) List(ctx context.Context, dir string, recursive bool) ([]string, error) {
@@ -429,10 +455,16 @@ func (rs *RedisStorage) Lock(ctx context.Context, name string) error {
 
 		// lock successfully obtained
 		if err == nil {
-			// store the lock in sync.map, needed for unlocking
-			rs.locks.Store(key, lock)
-			// keep the lock fresh as long as we hold it
+			refreshCtx, cancel := context.WithCancel(context.Background())
+			// store lock handle + refresh cancel function for Unlock()
+			rs.locks.Store(key, heldLock{
+				lock:   lock,
+				cancel: cancel,
+			})
+			// keep the lock fresh until Unlock() cancels refreshCtx
 			go func(ctx context.Context, lock *redislock.Lock) {
+				ticker := time.NewTicker(lockRefreshInterval)
+				defer ticker.Stop()
 				for {
 					// refresh the Redis lock
 					err := lock.Refresh(ctx, lockTTL, nil)
@@ -441,12 +473,12 @@ func (rs *RedisStorage) Lock(ctx context.Context, name string) error {
 					}
 
 					select {
-					case <-time.After(lockRefreshInterval):
+					case <-ticker.C:
 					case <-ctx.Done():
 						return
 					}
 				}
-			}(ctx, lock)
+			}(refreshCtx, lock)
 
 			return nil
 		}
@@ -472,11 +504,12 @@ func (rs *RedisStorage) Unlock(ctx context.Context, name string) error {
 	// load and delete lock from sync.Map
 	if syncMapLock, loaded := rs.locks.LoadAndDelete(key); loaded {
 
-		// type assertion for Redis lock
-		if lock, ok := syncMapLock.(*redislock.Lock); ok {
+		// type assertion for held lock
+		if lock, ok := syncMapLock.(heldLock); ok {
+			lock.cancel()
 
 			// release the Redis lock
-			if err := lock.Release(ctx); err != nil {
+			if err := lock.lock.Release(ctx); err != nil {
 				return fmt.Errorf("Unable to release lock for %s: %v", key, err)
 			}
 		}
@@ -548,8 +581,14 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 		fullPathKey := path.Join(dir, trimmedKey)
 
 		// Remove key from set if it does not exist
-		if !rs.Exists(ctx, fullPathKey) {
-			rs.client.ZRem(ctx, currKey, k)
+		exists, err := rs.existsWithErrorUnprefixed(ctx, fullPathKey)
+		if err != nil {
+			return err
+		}
+		if !exists {
+			if err := rs.client.ZRem(ctx, currKey, k).Err(); err != nil {
+				return fmt.Errorf("Unable to remove stale record '%s' from directory '%s': %v", k, currKey, err)
+			}
 			rs.logger.Infof("Removed non-existant record '%s' from directory '%s'", k, currKey)
 			continue
 		}
@@ -618,7 +657,9 @@ func (rs RedisStorage) storeDirectoryRecord(ctx context.Context, key string, sco
 		}
 		// recursively create parent directory until already
 		// created (success == 0) or top level reached
-		rs.storeDirectoryRecord(ctx, dir, score, repair, true)
+		if err := rs.storeDirectoryRecord(ctx, dir, score, repair, true); err != nil {
+			return err
+		}
 	}
 
 	return nil
@@ -639,10 +680,16 @@ func (rs RedisStorage) deleteDirectoryRecord(ctx context.Context, key string, ba
 	}
 
 	// Check if Set "dir" still exists (removing the last item deletes the set)
-	if exists := rs.client.Exists(ctx, dir).Val(); exists == 0 {
+	exists, err := rs.existsWithError(ctx, dir)
+	if err != nil {
+		return fmt.Errorf("Unable to check existence for %s: %v", dir, err)
+	}
+	if !exists {
 		// Recursively delete parent directory until parent
 		// is not empty (exists > 0) or top level reached
-		rs.deleteDirectoryRecord(ctx, dir, true)
+		if err := rs.deleteDirectoryRecord(ctx, dir, true); err != nil {
+			return err
+		}
 	}
 
 	return nil

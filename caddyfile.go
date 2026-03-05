@@ -7,6 +7,7 @@ import (
 	"net"
 	"reflect"
 	"strconv"
+	"strings"
 
 	"github.com/spf13/cobra"
 
@@ -212,12 +213,17 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 	rs.Username = repl.ReplaceAll(rs.Username, "")
 	rs.Password = repl.ReplaceAll(rs.Password, "")
 	rs.KeyPrefix = repl.ReplaceAll(rs.KeyPrefix, defaultKeyPrefix)
+	keyPrefix, err := normalizeKeyPrefix(rs.KeyPrefix)
+	if err != nil {
+		return err
+	}
+	rs.KeyPrefix = keyPrefix
 
 	if len(rs.EncryptionKey) > 0 {
 		rs.EncryptionKey = repl.ReplaceAll(rs.EncryptionKey, "")
 		// Encryption_key length must be at least 32 characters
 		if len(rs.EncryptionKey) < 32 {
-			return fmt.Errorf("invalid length for 'encryption_key', must contain at least 32 bytes: %s", rs.EncryptionKey)
+			return fmt.Errorf("invalid length for 'encryption_key', must contain at least 32 bytes")
 		}
 		// Truncate keys that are too long
 		if len(rs.EncryptionKey) > 32 {
@@ -246,11 +252,7 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 		maxPorts := len(rs.Port)
 
 		// Determine max number of addresses
-		if maxHosts > maxPorts {
-			maxAddrs = maxHosts
-		} else {
-			maxAddrs = maxPorts
-		}
+		maxAddrs = max(maxHosts, maxPorts)
 
 		for i := 0; i < maxAddrs; i++ {
 			if i < maxHosts {
@@ -267,6 +269,20 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 	}
 
 	return rs.initRedisClient(ctx)
+}
+
+func normalizeKeyPrefix(prefix string) (string, error) {
+	p := strings.TrimSpace(prefix)
+	p = strings.Trim(p, "/")
+	if p != "" {
+		// Malformed prefixes might cause problems for path.Join() later
+		for segment := range strings.SplitSeq(p, "/") {
+			if segment == "" || segment == "." || segment == ".." {
+				return "", fmt.Errorf("invalid key_prefix segment: %q", segment)
+			}
+		}
+	}
+	return p, nil
 }
 
 func (rs *RedisStorage) Cleanup() error {
@@ -307,7 +323,7 @@ func cmdRedisStorageRepair(fl caddycmd.Flags) (int, error) {
 		return caddy.ExitCodeFailedStartup, err
 	}
 	// Ensure loaded module is the correct type
-	if reflect.TypeOf(module) != reflect.TypeOf(&RedisStorage{}) {
+	if reflect.TypeOf(module) != reflect.TypeFor[*RedisStorage]() {
 		return caddy.ExitCodeFailedStartup, fmt.Errorf("Loaded storage module does not support Redis")
 	}
 
