@@ -3,8 +3,11 @@ package storageredis
 import (
 	"bytes"
 	"compress/flate"
-	"io/ioutil"
+	"fmt"
+	"io"
 )
+
+const maxDecompressedBytes int64 = 4 << 20 // 4 MiB
 
 func (rs *RedisStorage) compress(input []byte) ([]byte, error) {
 
@@ -28,14 +31,15 @@ func (rs *RedisStorage) compress(input []byte) ([]byte, error) {
 func (rs *RedisStorage) uncompress(input []byte) ([]byte, error) {
 
 	reader := flate.NewReader(bytes.NewReader(input))
+	defer reader.Close()
 
-	output, err := ioutil.ReadAll(reader)
+	limitedReader := io.LimitReader(reader, maxDecompressedBytes+1)
+	output, err := io.ReadAll(limitedReader)
 	if err != nil {
 		return nil, err
 	}
-
-	if err = reader.Close(); err != nil {
-		return nil, err
+	if int64(len(output)) > maxDecompressedBytes {
+		return nil, fmt.Errorf("decompressed value exceeds limit (%d bytes)", maxDecompressedBytes)
 	}
 
 	return output, nil

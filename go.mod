@@ -3,6 +3,7 @@ module github.com/pberkel/caddy-storage-redis
 go 1.25.0
 
 require (
+	github.com/alicebob/miniredis/v2 v2.35.0
 	github.com/bsm/redislock v0.9.4
 	github.com/caddyserver/caddy/v2 v2.11.1
 	github.com/caddyserver/certmagic v0.25.2
@@ -39,6 +40,7 @@ require (
 	github.com/rogpeppe/go-internal v1.11.0 // indirect
 	github.com/russross/blackfriday/v2 v2.1.0 // indirect
 	github.com/spf13/pflag v1.0.10 // indirect
+	github.com/yuin/gopher-lua v1.1.1 // indirect
 	github.com/zeebo/blake3 v0.2.4 // indirect
 	go.uber.org/atomic v1.11.0 // indirect
 	go.uber.org/automaxprocs v1.6.0 // indirect

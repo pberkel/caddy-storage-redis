@@ -18,3 +18,16 @@ func TestRedisStorage_ComressUncompress(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, originalValue, uncompressedValue)
 }
+
+func TestRedisStorage_UncompressExceedsLimit(t *testing.T) {
+	rs := New()
+	originalValue := make([]byte, maxDecompressedBytes+1)
+
+	compressedValue, err := rs.compress(originalValue)
+	assert.NoError(t, err)
+
+	uncompressedValue, err := rs.uncompress(compressedValue)
+	assert.Nil(t, uncompressedValue)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "decompressed value exceeds limit")
+}

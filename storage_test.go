@@ -10,7 +10,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
 )
 
@@ -38,6 +40,11 @@ var (
 
 // Emulate the Provision() Caddy function
 func provisionRedisStorage(t *testing.T) (*RedisStorage, context.Context) {
+	t.Helper()
+
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	t.Cleanup(mr.Close)
 
 	ctx := context.Background()
 	rs := New()
@@ -45,23 +52,19 @@ func provisionRedisStorage(t *testing.T) (*RedisStorage, context.Context) {
 	logger, _ := zap.NewProduction()
 	rs.logger = logger.Sugar()
 
+	rs.Address = []string{mr.Addr()}
 	rs.DB = TestDB
 	rs.KeyPrefix = TestKeyPrefix
 	rs.EncryptionKey = TestEncryptionKey
 	rs.Compression = TestCompression
 
-	err := rs.finalizeConfiguration(ctx)
-	assert.NoError(t, err)
-
-	// Skip test if unable to connect to Redis server
-	if err != nil {
-		t.Skip()
-		return nil, nil
-	}
+	err = rs.finalizeConfiguration(ctx)
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rs.Cleanup() })
 
 	// Flush the current Redis database
 	err = rs.client.FlushDB(ctx).Err()
-	assert.NoError(t, err)
+	require.NoError(t, err)
 
 	return rs, ctx
 }
@@ -279,12 +282,12 @@ func TestRedisStorage_MultipleLocks(t *testing.T) {
 	var wg sync.WaitGroup
 	var rsArray = make([]*RedisStorage, TestKeyLockIterations)
 
-	for i := 0; i < len(rsArray); i++ {
+	for i := range rsArray {
 		rsArray[i], _ = provisionRedisStorage(t)
 		wg.Add(1)
 	}
 
-	for i := 0; i < len(rsArray); i++ {
+	for i := range rsArray {
 		suffix := strconv.Itoa(i / 10)
 		go lockAndUnlock(t, &wg, rsArray[i], TestKeyLock+"-"+suffix)
 	}
