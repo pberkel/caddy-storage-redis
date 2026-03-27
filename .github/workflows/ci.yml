@@ -1,0 +1,60 @@
+name: Go Unit Tests
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - ready_for_review
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Check formatting
+        id: gofmt
+        continue-on-error: true
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "unformatted files: $unformatted"
+            exit 1
+          fi
+
+      - name: Report formatting failure without failing workflow
+        if: steps.gofmt.outcome == 'failure'
+        run: |
+          echo "::warning::gofmt check failed. This workflow is non-blocking by design."
+
+      - name: Run vet
+        id: govet
+        continue-on-error: true
+        run: go vet ./...
+
+      - name: Report vet failure without failing workflow
+        if: steps.govet.outcome == 'failure'
+        run: |
+          echo "::warning::go vet failed. This workflow is non-blocking by design."
+
+      - name: Run unit tests
+        id: unit_tests
+        continue-on-error: true
+        run: go test ./...
+
+      - name: Report test failure without failing workflow
+        if: steps.unit_tests.outcome == 'failure'
+        run: |
+          echo "::warning::go test failed. This workflow is non-blocking by design."
