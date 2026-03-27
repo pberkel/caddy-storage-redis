@@ -32,6 +32,110 @@ func newFinalizeTestStorage(t *testing.T) (*RedisStorage, *miniredis.Miniredis) 
 	return rs, mr
 }
 
+func TestFinalizeConfiguration_FailoverRequiresMasterName(t *testing.T) {
+	t.Parallel()
+
+	t.Run("failover without master_name rejected", func(t *testing.T) {
+		rs := New()
+		rs.ClientType = "failover"
+		rs.Address = []string{"127.0.0.1:26379"}
+
+		err := rs.finalizeConfiguration(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "master_name")
+	})
+
+	t.Run("failover with master_name accepted", func(t *testing.T) {
+		rs, mr := newFinalizeTestStorage(t)
+		rs.ClientType = "failover"
+		rs.MasterName = "mymaster"
+		rs.Address = []string{mr.Addr()}
+
+		// miniredis does not implement Sentinel; we only verify that
+		// the master_name check itself does not return an error.
+		err := rs.finalizeConfiguration(context.Background())
+		if err != nil {
+			assert.NotContains(t, err.Error(), "master_name")
+		}
+	})
+}
+
+func TestFinalizeConfiguration_CompressionPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	t.Run("flate placeholder resolved", func(t *testing.T) {
+		rs, mr := newFinalizeTestStorage(t)
+		rs.Address = []string{mr.Addr()}
+		// Simulate a placeholder that has already been resolved to "flate"
+		rs.Compression = CompressionMode("flate")
+
+		err := rs.finalizeConfiguration(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, CompressionFlate, rs.Compression)
+	})
+
+	t.Run("zlib placeholder resolved", func(t *testing.T) {
+		rs, mr := newFinalizeTestStorage(t)
+		rs.Address = []string{mr.Addr()}
+		rs.Compression = CompressionMode("zlib")
+
+		err := rs.finalizeConfiguration(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, CompressionZlib, rs.Compression)
+	})
+
+	t.Run("false string normalised to none", func(t *testing.T) {
+		rs, mr := newFinalizeTestStorage(t)
+		rs.Address = []string{mr.Addr()}
+		rs.Compression = CompressionMode("false")
+
+		err := rs.finalizeConfiguration(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, CompressionNone, rs.Compression)
+	})
+
+	t.Run("invalid compression value rejected", func(t *testing.T) {
+		rs := New()
+		rs.Compression = CompressionMode("gzip")
+
+		err := rs.finalizeConfiguration(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid compression value")
+	})
+}
+
+func TestFinalizeConfiguration_DBPlaceholder(t *testing.T) {
+	t.Parallel()
+
+	t.Run("valid db value accepted", func(t *testing.T) {
+		rs, mr := newFinalizeTestStorage(t)
+		rs.Address = []string{mr.Addr()}
+		rs.DB = DBIndex("3")
+
+		err := rs.finalizeConfiguration(context.Background())
+		require.NoError(t, err)
+		assert.Equal(t, DBIndex("3"), rs.DB)
+	})
+
+	t.Run("negative db rejected", func(t *testing.T) {
+		rs := New()
+		rs.DB = DBIndex("-1")
+
+		err := rs.finalizeConfiguration(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid db value")
+	})
+
+	t.Run("non-numeric db rejected", func(t *testing.T) {
+		rs := New()
+		rs.DB = DBIndex("abc")
+
+		err := rs.finalizeConfiguration(context.Background())
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "invalid db value")
+	})
+}
+
 func TestFinalizeConfiguration_KeyPrefixNormalization(t *testing.T) {
 	t.Parallel()
 

@@ -32,7 +32,7 @@ const (
 	defaultPort = "6379"
 
 	// Redis server database
-	defaultDb = 0
+	defaultDb = "0"
 
 	// Prepended to every Redis key
 	defaultKeyPrefix = "caddy"
@@ -46,12 +46,6 @@ const (
 	// Always verify TLS cerficate
 	defaultTLSInsecure = false
 
-	// Routing option for cluster client
-	defaultRouteByLatency = false
-
-	// Routing option for cluster client
-	defaultRouteRandomly = false
-
 	// Redis lock time-to-live
 	lockTTL = 5 * time.Second
 
@@ -63,7 +57,7 @@ const (
 )
 
 // RedisStorage implements a Caddy storage backend for Redis
-// It supports Single (Standalone), Cluster, or Sentinal (Failover) Redis server configurations.
+// It supports Single (Standalone), Cluster, or Sentinel (Failover) Redis server configurations.
 type RedisStorage struct {
 	// ClientType specifies the Redis client type. Valid values are "cluster" or "failover"
 	ClientType string `json:"client_type"`
@@ -74,8 +68,8 @@ type RedisStorage struct {
 	Host []string `json:"host"`
 	// Host The Redis server port number. Default: "6379"
 	Port []string `json:"port"`
-	// DB The Redis server database number. Default: 0
-	DB int `json:"db"`
+	// DB The Redis server database number. Default: 0. Supports Caddy placeholder substitution.
+	DB DBIndex `json:"db"`
 	// Timeout The Redis server timeout in seconds. Default: 5
 	Timeout string `json:"timeout"`
 	// Username The username for authenticating with the Redis server. Default: "" (No authentication)
@@ -84,7 +78,7 @@ type RedisStorage struct {
 	Password string `json:"password"`
 	// SentinelPassword Optional The Redis sentinel password if authentication is enabled.
 	SentinelPassword string `json:"sentinel_password"`
-	// MasterName Only required when connecting to Redis via Sentinal (Failover mode). Default ""
+	// MasterName Only required when connecting to Redis via Sentinel (Failover mode). Default ""
 	MasterName string `json:"master_name"`
 	// KeyPrefix A string prefix that is appended to Redis keys. Default: "caddy"
 	// Useful when the Redis server is used by multiple applications.
@@ -162,6 +156,29 @@ func (c *CompressionMode) UnmarshalJSON(data []byte) error {
 	return nil
 }
 
+// DBIndex holds a Redis database index. It accepts both integer (legacy JSON form)
+// and string (new JSON form) during unmarshalling, enabling runtime placeholder
+// substitution via Caddy's replacer (e.g. {env.REDIS_DB}).
+type DBIndex string
+
+// UnmarshalJSON accepts both the legacy integer form used in earlier configs
+// ("db": 0) and the new string form ("db": "0"), preserving backwards compatibility.
+func (d *DBIndex) UnmarshalJSON(data []byte) error {
+	// Try int first to handle legacy JSON configs
+	var n int
+	if json.Unmarshal(data, &n) == nil {
+		*d = DBIndex(strconv.Itoa(n))
+		return nil
+	}
+	// Fall through to string form for new configs and placeholder-resolved values
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	*d = DBIndex(s)
+	return nil
+}
+
 type heldLock struct {
 	lock   *redislock.Lock
 	cancel context.CancelFunc
@@ -189,7 +206,7 @@ func New() *RedisStorage {
 		ClientType:  defaultClientType,
 		Host:        []string{defaultHost},
 		Port:        []string{defaultPort},
-		DB:          defaultDb,
+		DB:          DBIndex(defaultDb),
 		KeyPrefix:   defaultKeyPrefix,
 		Compression: CompressionNone,
 		TlsEnabled:  defaultTLS,
@@ -198,8 +215,11 @@ func New() *RedisStorage {
 	return &rs
 }
 
-// Initilalize Redis client and locker
+// Initialize Redis client and locker
 func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
+
+	// DB was validated in finalizeConfiguration; parse is safe here
+	dbInt, _ := strconv.Atoi(string(rs.DB))
 
 	// Configure options for all client types
 	clientOpts := redis.UniversalOptions{
@@ -207,7 +227,7 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 		MasterName: rs.MasterName,
 		Username:   rs.Username,
 		Password:   rs.Password,
-		DB:         rs.DB,
+		DB:         dbInt,
 	}
 
 	// Configure timeout values if defined
@@ -647,7 +667,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 				return fmt.Errorf("Unable to remove stale record '%s' from directory '%s': %v", k, currKey, err)
 			}
 			if rs.logger != nil {
-				rs.logger.Infof("Removed non-existant record '%s' from directory '%s'", k, currKey)
+				rs.logger.Infof("Removed non-existent record '%s' from directory '%s'", k, currKey)
 			}
 			continue
 		}
@@ -693,7 +713,7 @@ func (rs RedisStorage) loadStorageData(ctx context.Context, key string) (*Storag
 	return sd, nil
 }
 
-// Store directory index in Redis ZSet structure for fast and efficient travseral in List()
+// Store directory index in Redis ZSet structure for fast and efficient traversal in List()
 func (rs RedisStorage) storeDirectoryRecord(ctx context.Context, key string, score float64, repair, baseIsDir bool) error {
 
 	// Extract parent directory and base (file) names from key

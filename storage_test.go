@@ -17,10 +17,10 @@ import (
 )
 
 const (
-	TestDB            = 9
-	TestKeyPrefix     = "redistlstest"
-	TestEncryptionKey = "1aedfs5kcM8lOZO3BDDMuwC23croDwRr"
-	TestCompression   = CompressionFlate
+	TestDB            DBIndex = "9"
+	TestKeyPrefix             = "redistlstest"
+	TestEncryptionKey         = "1aedfs5kcM8lOZO3BDDMuwC23croDwRr"
+	TestCompression           = CompressionFlate
 
 	TestKeyCertPath    = "certificates"
 	TestKeyAcmePath    = TestKeyCertPath + "/acme-v02.api.letsencrypt.org-directory"

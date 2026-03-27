@@ -87,11 +87,7 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			case "port":
 				rs.Port = configVal
 			case "db":
-				dbParse, err := strconv.Atoi(configVal[0])
-				if err != nil {
-					return d.Errf("invalid db value: %s", configVal[0])
-				}
-				rs.DB = dbParse
+				rs.DB = DBIndex(configVal[0])
 			case "timeout":
 				rs.Timeout = configVal[0]
 			case "username":
@@ -260,8 +256,13 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 		return fmt.Errorf("invalid compression value: %q (expected 'flate', 'zlib', or 'false')", rs.Compression)
 	}
 
+	rs.DB = DBIndex(repl.ReplaceAll(string(rs.DB), defaultDb))
+	dbInt, err := strconv.Atoi(string(rs.DB))
+	if err != nil || dbInt < 0 {
+		return fmt.Errorf("invalid db value: %s", rs.DB)
+	}
+
 	// TODO: these are non-string fields so they can't easily be substituted at runtime :(
-	// rs.DB
 	// rs.TlsEnabled
 	// rs.TlsInsecure
 	// rs.RouteByLatency

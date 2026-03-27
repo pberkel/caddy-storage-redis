@@ -4,11 +4,12 @@
 
 - **`compression` now supports zlib.** The `compression` parameter accepts a new `"zlib"` value in addition to the existing `"flate"` (raw DEFLATE). zlib adds a header and Adler-32 checksum, providing integrity verification on decompression. Flate- and zlib-compressed values can coexist in the same Redis instance without any migration — the algorithm is stored per value and selected automatically on load.
 - **`compression` now supports placeholder substitution.** The parameter has been changed from a boolean to a string type, enabling runtime substitution via Caddy placeholders (e.g. `{env.REDIS_COMPRESSION}`). Legacy boolean values (`true`, `false`, `1`, `0`, etc.) continue to work unchanged, with `true` mapping to `"flate"`.
+- **`db` now supports placeholder substitution.** The parameter has been changed from an integer to a string type, enabling runtime substitution via Caddy placeholders (e.g. `{env.REDIS_DB}`). Legacy integer values in JSON configs continue to work unchanged.
 - **`sentinel_password` now supports placeholder substitution.** The parameter previously did not go through Caddy's replacer at provision time. It now does, consistent with `password` and other credential fields.
 
 ### Improvements
 
-- `compression` is removed from the list of parameters that do not support runtime substitution.
+- `compression` and `db` are removed from the list of parameters that do not support runtime substitution.
 
 # v1.7.1 (2026-03-27)
 
@@ -41,13 +42,13 @@
 This version adds support for Caddy Server 2.11.1 which introduced a breaking change
 to the return parameters of function caddycmd.LoadConfig() which is used by this module.
 
-Several important module dependancies were updated for security reasons in this release:
+Several important module dependencies were updated for security reasons in this release:
  - github.com/redis/go-redis from v9.3.0 to v9.18
  - github.com/spf13/cobra from v1.7.0 to v1.10.2
  - github.com/stretchr/testify from v1.9.0 to v1.11.1
  - go.uber.org/zap from v1.25.0 to v1.27.1
 
-As well as many indirect dependancy upgrades resulting from the above changes.
+As well as many indirect dependency upgrades resulting from the above changes.
 
 # v1.5.0 (2025-12-11)
 
@@ -64,7 +65,7 @@ compatibility with secured Redis Sentinel setups.
 
 # v1.3.0 (2024-07-03)
 
-Updated documentation and project dependancies only. No functional changes included.
+Updated documentation and project dependencies only. No functional changes included.
 
 # v1.2.0 (2024-04-03)
 
