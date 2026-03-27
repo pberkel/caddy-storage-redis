@@ -24,7 +24,14 @@ func TestRedisStorage_DecryptShortCiphertextFails(t *testing.T) {
 	rs := New()
 	rs.EncryptionKey = "1aedfs5kcM8lOZO3BDDMuwC23croDwRr"
 
+	// 5 bytes: well below the nonce+tag minimum
 	decryptedValue, err := rs.decrypt([]byte("short"))
+	assert.Nil(t, decryptedValue)
+	assert.Error(t, err)
+	assert.Contains(t, err.Error(), "Invalid encrypted data")
+
+	// 27 bytes: one below the minimum (nonce=12 + tag=16 = 28)
+	decryptedValue, err = rs.decrypt(make([]byte, 27))
 	assert.Nil(t, decryptedValue)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "Invalid encrypted data")

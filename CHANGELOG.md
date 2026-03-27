@@ -1,3 +1,29 @@
+# v1.7.1 (2026-03-27)
+
+### Bug fixes
+
+- **`failover` client type now requires `master_name`.** Previously, configuring `client_type failover` without a `master_name` silently fell back to a simple standalone client. An error is now returned at startup.
+- **Unknown Caddyfile configuration keys are now rejected.** Unrecognised keys (e.g. typos such as `tls_enable` instead of `tls_enabled`) previously passed silently, leaving security-relevant options at their defaults without warning. An error is now returned at parse time.
+- **`Repair()` no longer panics when called without a logger.** Logger calls in `Repair()` and `storeDirectoryRecord()` are now nil-guarded, consistent with the rest of the codebase.
+- **Lock refresh goroutine improved.** The refresh no longer fires immediately on lock acquisition (the lock is already fresh). Transient Redis errors during refresh are now logged as warnings and retried on the next interval, rather than silently stopping the refresh and allowing the lock to expire.
+- **Decrypt minimum-length guard tightened.** The short-ciphertext check now uses `gcm.NonceSize() + gcm.Overhead()` (28 bytes) derived from the cipher instance, replacing the weaker `aes.BlockSize` (16 byte) check.
+
+# v1.7.0 (2026-03-09)
+
+### Security fixes
+
+- **TLS certificate verification is now enabled by default.** Prior to this release `tls_insecure` defaulted to `true`, meaning TLS connections to Redis did not verify the server certificate. The default is now `false`. Users who require TLS without a verifiable certificate must explicitly set `tls_insecure true` in their configuration.
+- **`key_prefix` is now validated and normalised.** Leading and trailing `/` characters are stripped, and prefixes containing empty segments or path traversal segments (`.` or `..`) are rejected at startup.
+- **Encryption key is no longer included in startup error messages.** Previously, a too-short `encryption_key` value was echoed in the error message.
+- **Decompression bomb protection.** Decompression is now limited to 4 MiB. Values that decompress beyond this limit are rejected with an error.
+
+### Improvements
+
+- Updated `go-redis` from v9.17.2 to v9.18.0.
+- Added `miniredis/v2` as a test dependency to enable unit tests without a live Redis instance.
+- Added a GitHub Actions workflow that runs unit tests on pull requests.
+- Expanded test coverage for configuration validation, encryption, and compression edge cases.
+
 # v1.6.0 (2026-02-24)
 
 This version adds support for Caddy Server 2.11.1 which introduced a breaking change
