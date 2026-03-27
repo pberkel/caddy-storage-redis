@@ -40,9 +40,6 @@ const (
 	// Separator for Redis key path segments
 	keyPathSeparator = "/"
 
-	// Compress values before storing
-	defaultCompression = false
-
 	// Connect to Redis via TLS
 	defaultTLS = false
 
@@ -95,8 +92,10 @@ type RedisStorage struct {
 	// EncryptionKey A key string used to symmetrically encrypt and decrypt data stored in Redis.
 	// The key must be exactly 32 characters, longer values will be truncated. Default: "" (No encryption)
 	EncryptionKey string `json:"encryption_key"`
-	// Compression Specifies whether values should be compressed before storing in Redis. Default: false
-	Compression bool `json:"compression"`
+	// Compression Specifies the compression algorithm to use when storing values in Redis.
+	// Valid values are "flate", "zlib", or "false" (no compression). Default: "" (no compression)
+	// Supports Caddy placeholders (e.g. {env.COMPRESSION}).
+	Compression CompressionMode `json:"compression"`
 	// TlsEnabled controls whether TLS will be used to connect to the Redis
 	// server. False by default.
 	TlsEnabled bool `json:"tls_enabled"`
@@ -129,10 +128,51 @@ type RedisStorage struct {
 	locks  *sync.Map
 }
 
+// CompressionMode specifies the compression algorithm used when storing values.
+// Accepts both the legacy boolean form (true=flate, false=none) and string form in JSON,
+// allowing runtime placeholder substitution via Caddy's replacer (e.g. {env.COMPRESSION}).
+type CompressionMode string
+
+const (
+	CompressionNone  CompressionMode = ""
+	CompressionFlate CompressionMode = "flate"
+	CompressionZlib  CompressionMode = "zlib"
+)
+
+// UnmarshalJSON accepts both the legacy boolean form used before v1.7.1
+// ("compression": true/false) and the new string form ("compression": "flate"/"zlib"/"false"),
+// preserving backwards compatibility with existing JSON configurations.
+func (c *CompressionMode) UnmarshalJSON(data []byte) error {
+	// Try bool first to handle legacy configs: true → "flate", false → ""
+	var b bool
+	if json.Unmarshal(data, &b) == nil {
+		if b {
+			*c = CompressionFlate
+		} else {
+			*c = CompressionNone
+		}
+		return nil
+	}
+	// Fall through to string form for new configs and placeholder-resolved values
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	*c = CompressionMode(s)
+	return nil
+}
+
 type heldLock struct {
 	lock   *redislock.Lock
 	cancel context.CancelFunc
 }
+
+// StorageData compression flag values stored per value in Redis.
+const (
+	storageCompressionNone  = 0
+	storageCompressionFlate = 1
+	storageCompressionZlib  = 2
+)
 
 type StorageData struct {
 	Value       []byte    `json:"value"`
@@ -151,7 +191,7 @@ func New() *RedisStorage {
 		Port:        []string{defaultPort},
 		DB:          defaultDb,
 		KeyPrefix:   defaultKeyPrefix,
-		Compression: defaultCompression,
+		Compression: CompressionNone,
 		TlsEnabled:  defaultTLS,
 		TlsInsecure: defaultTLSInsecure,
 	}
@@ -273,11 +313,11 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 func (rs RedisStorage) Store(ctx context.Context, key string, value []byte) error {
 
 	var size = len(value)
-	var compressionFlag = 0
+	var compressionFlag = storageCompressionNone
 	var encryptionFlag = 0
 
 	// Compress value if compression enabled
-	if rs.Compression {
+	if rs.Compression != CompressionNone {
 		compressedValue, err := rs.compress(value)
 		if err != nil {
 			return fmt.Errorf("Unable to compress value for %s: %v", key, err)
@@ -285,7 +325,11 @@ func (rs RedisStorage) Store(ctx context.Context, key string, value []byte) erro
 		// Check compression efficiency
 		if size > len(compressedValue) {
 			value = compressedValue
-			compressionFlag = 1
+			if rs.Compression == CompressionZlib {
+				compressionFlag = storageCompressionZlib
+			} else {
+				compressionFlag = storageCompressionFlate
+			}
 		}
 	}
 
@@ -348,11 +392,11 @@ func (rs RedisStorage) Load(ctx context.Context, key string) ([]byte, error) {
 		}
 	}
 
-	// Uncompress value if compressed
-	if sd.Compression > 0 {
-		value, err = rs.uncompress(value)
+	// Decompress value if compressed
+	if sd.Compression > storageCompressionNone {
+		value, err = rs.decompress(value, sd.Compression)
 		if err != nil {
-			return nil, fmt.Errorf("Unable to uncompress value for %s: %v", key, err)
+			return nil, fmt.Errorf("Unable to decompress value for %s: %v", key, err)
 		}
 	}
 
@@ -559,8 +603,8 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 				sd, err := rs.loadStorageData(ctx, trimmedKey)
 				if err != nil {
 					if rs.logger != nil {
-					rs.logger.Infof("Unable to load storage data for key '%s'", trimmedKey)
-				}
+						rs.logger.Infof("Unable to load storage data for key '%s'", trimmedKey)
+					}
 					continue
 				}
 

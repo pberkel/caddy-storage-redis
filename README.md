@@ -53,7 +53,7 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
         timeout        5
         key_prefix     "caddy" // should not contain any leading or trailing '/' characters nor '.' or '..' path segments
         encryption_key ""      // default no encryption; enable by specifying a secret key containing 32 characters (longer keys will be truncated)
-        compression    false   // default no compression; if set to true, stored values are compressed using "compress/flate"
+        compression    false   // compression algorithm: 'flate' (raw DEFLATE), 'zlib', or 'false' (no compression, the default). Legacy boolean 'true' maps to 'flate'
         tls_enabled    false
         tls_insecure   false
     }
@@ -116,15 +116,14 @@ The module supports [environment variable substitution](https://caddyserver.com/
         username       "{$REDIS_USERNAME}"
         password       "{$REDIS_PASSWORD}"
         encryption_key "{$REDIS_ENCRYPTION_KEY}"
-        compression    true
+        compression    "{$REDIS_COMPRESSION}"
     }
 }
 ```
 
-NOTE however the following configuration options do not (yet) support runtime substition:
+NOTE however the following configuration options do not (yet) support runtime substitution:
 
 - db
-- compression
 - tls_enabled
 - tls_insecure
 - route_by_latency

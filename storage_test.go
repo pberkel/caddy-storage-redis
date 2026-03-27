@@ -20,15 +20,15 @@ const (
 	TestDB            = 9
 	TestKeyPrefix     = "redistlstest"
 	TestEncryptionKey = "1aedfs5kcM8lOZO3BDDMuwC23croDwRr"
-	TestCompression   = true
+	TestCompression   = CompressionFlate
 
-	TestKeyCertPath       = "certificates"
-	TestKeyAcmePath       = TestKeyCertPath + "/acme-v02.api.letsencrypt.org-directory"
-	TestKeyExamplePath    = TestKeyAcmePath + "/example.com"
-	TestKeyExampleCrt     = TestKeyExamplePath + "/example.com.crt"
-	TestKeyExampleKey     = TestKeyExamplePath + "/example.com.key"
-	TestKeyExampleJson    = TestKeyExamplePath + "/example.com.json"
-	TestKeyLock = "locks/issue_cert_example.com"
+	TestKeyCertPath    = "certificates"
+	TestKeyAcmePath    = TestKeyCertPath + "/acme-v02.api.letsencrypt.org-directory"
+	TestKeyExamplePath = TestKeyAcmePath + "/example.com"
+	TestKeyExampleCrt  = TestKeyExamplePath + "/example.com.crt"
+	TestKeyExampleKey  = TestKeyExamplePath + "/example.com.key"
+	TestKeyExampleJson = TestKeyExamplePath + "/example.com.json"
+	TestKeyLock        = "locks/issue_cert_example.com"
 )
 
 var (

@@ -117,11 +117,23 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 			case "encryption_key", "aes_key":
 				rs.EncryptionKey = configVal[0]
 			case "compression":
-				Compression, err := strconv.ParseBool(configVal[0])
-				if err != nil {
-					return d.Errf("invalid boolean value for 'compression': %s", configVal[0])
+				// Accept legacy bool values (true/false, 1/0, t/f, etc.) for backwards
+				// compatibility, mapping true → "flate". If ParseBool fails, expect one
+				// of the named algorithm strings.
+				if b, err := strconv.ParseBool(configVal[0]); err == nil {
+					if b {
+						rs.Compression = CompressionFlate
+					} else {
+						rs.Compression = CompressionNone
+					}
+				} else {
+					switch CompressionMode(configVal[0]) {
+					case CompressionFlate, CompressionZlib:
+						rs.Compression = CompressionMode(configVal[0])
+					default:
+						return d.Errf("invalid value for 'compression': %s (expected 'true', 'flate', 'zlib', or 'false')", configVal[0])
+					}
 				}
-				rs.Compression = Compression
 			case "tls_enabled":
 				TlsEnabledParse, err := strconv.ParseBool(configVal[0])
 				if err != nil {
@@ -214,6 +226,7 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 	rs.MasterName = repl.ReplaceAll(rs.MasterName, "")
 	rs.Username = repl.ReplaceAll(rs.Username, "")
 	rs.Password = repl.ReplaceAll(rs.Password, "")
+	rs.SentinelPassword = repl.ReplaceAll(rs.SentinelPassword, "")
 	rs.KeyPrefix = repl.ReplaceAll(rs.KeyPrefix, defaultKeyPrefix)
 	keyPrefix, err := normalizeKeyPrefix(rs.KeyPrefix)
 	if err != nil {
@@ -236,9 +249,19 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 	rs.TlsServerCertsPEM = repl.ReplaceAll(rs.TlsServerCertsPEM, "")
 	rs.TlsServerCertsPath = repl.ReplaceAll(rs.TlsServerCertsPath, "")
 
+	switch CompressionMode(repl.ReplaceAll(string(rs.Compression), "")) {
+	case CompressionNone, "false":
+		rs.Compression = CompressionNone
+	case CompressionFlate, "true":
+		rs.Compression = CompressionFlate
+	case CompressionZlib:
+		rs.Compression = CompressionZlib
+	default:
+		return fmt.Errorf("invalid compression value: %q (expected 'flate', 'zlib', or 'false')", rs.Compression)
+	}
+
 	// TODO: these are non-string fields so they can't easily be substituted at runtime :(
 	// rs.DB
-	// rs.Compression
 	// rs.TlsEnabled
 	// rs.TlsInsecure
 	// rs.RouteByLatency

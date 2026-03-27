@@ -1,3 +1,15 @@
+# v1.8.0 (unreleased)
+
+### New features
+
+- **`compression` now supports zlib.** The `compression` parameter accepts a new `"zlib"` value in addition to the existing `"flate"` (raw DEFLATE). zlib adds a header and Adler-32 checksum, providing integrity verification on decompression. Flate- and zlib-compressed values can coexist in the same Redis instance without any migration — the algorithm is stored per value and selected automatically on load.
+- **`compression` now supports placeholder substitution.** The parameter has been changed from a boolean to a string type, enabling runtime substitution via Caddy placeholders (e.g. `{env.REDIS_COMPRESSION}`). Legacy boolean values (`true`, `false`, `1`, `0`, etc.) continue to work unchanged, with `true` mapping to `"flate"`.
+- **`sentinel_password` now supports placeholder substitution.** The parameter previously did not go through Caddy's replacer at provision time. It now does, consistent with `password` and other credential fields.
+
+### Improvements
+
+- `compression` is removed from the list of parameters that do not support runtime substitution.
+
 # v1.7.1 (2026-03-27)
 
 ### Bug fixes
