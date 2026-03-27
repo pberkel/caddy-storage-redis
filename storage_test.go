@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"io/fs"
-	"strconv"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -28,8 +28,7 @@ const (
 	TestKeyExampleCrt     = TestKeyExamplePath + "/example.com.crt"
 	TestKeyExampleKey     = TestKeyExamplePath + "/example.com.key"
 	TestKeyExampleJson    = TestKeyExamplePath + "/example.com.json"
-	TestKeyLock           = "locks/issue_cert_example.com"
-	TestKeyLockIterations = 250
+	TestKeyLock = "locks/issue_cert_example.com"
 )
 
 var (
@@ -277,33 +276,33 @@ func TestRedisStorage_LockUnlock(t *testing.T) {
 	assert.NoError(t, err)
 }
 
-func TestRedisStorage_MultipleLocks(t *testing.T) {
+func TestRedisStorage_LockContention(t *testing.T) {
 
+	rs, ctx := provisionRedisStorage(t)
+
+	const goroutines = 5
 	var wg sync.WaitGroup
-	var rsArray = make([]*RedisStorage, TestKeyLockIterations)
+	var concurrent int32
 
-	for i := range rsArray {
-		rsArray[i], _ = provisionRedisStorage(t)
-		wg.Add(1)
-	}
+	wg.Add(goroutines)
+	for range goroutines {
+		go func() {
+			defer wg.Done()
 
-	for i := range rsArray {
-		suffix := strconv.Itoa(i / 10)
-		go lockAndUnlock(t, &wg, rsArray[i], TestKeyLock+"-"+suffix)
+			err := rs.Lock(ctx, TestKeyLock)
+			assert.NoError(t, err)
+
+			// Assert mutual exclusion: counter must be exactly 1 while lock is held
+			held := atomic.AddInt32(&concurrent, 1)
+			assert.Equal(t, int32(1), held, "multiple goroutines held the lock simultaneously")
+			atomic.AddInt32(&concurrent, -1)
+
+			err = rs.Unlock(ctx, TestKeyLock)
+			assert.NoError(t, err)
+		}()
 	}
 
 	wg.Wait()
-}
-
-func lockAndUnlock(t *testing.T, wg *sync.WaitGroup, rs *RedisStorage, key string) {
-
-	defer wg.Done()
-
-	err := rs.Lock(context.Background(), key)
-	assert.NoError(t, err)
-
-	err = rs.Unlock(context.Background(), key)
-	assert.NoError(t, err)
 }
 
 func TestRedisStorage_String(t *testing.T) {

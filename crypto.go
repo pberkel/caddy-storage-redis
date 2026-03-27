@@ -31,10 +31,6 @@ func (rs *RedisStorage) encrypt(bytes []byte) ([]byte, error) {
 
 func (rs *RedisStorage) decrypt(bytes []byte) ([]byte, error) {
 
-	if len(bytes) < aes.BlockSize {
-		return nil, fmt.Errorf("Invalid encrypted data")
-	}
-
 	block, err := aes.NewCipher([]byte(rs.EncryptionKey))
 	if err != nil {
 		return nil, fmt.Errorf("Unable to create AES cipher: %v", err)
@@ -43,6 +39,10 @@ func (rs *RedisStorage) decrypt(bytes []byte) ([]byte, error) {
 	gcm, err := cipher.NewGCM(block)
 	if err != nil {
 		return nil, fmt.Errorf("Unable to create GCM cipher: %v", err)
+	}
+
+	if len(bytes) < gcm.NonceSize()+gcm.Overhead() {
+		return nil, fmt.Errorf("Invalid encrypted data")
 	}
 
 	out, err := gcm.Open(nil, bytes[:gcm.NonceSize()], bytes[gcm.NonceSize():], nil)

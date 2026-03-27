@@ -154,6 +154,8 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.Errf("invalid boolean value for 'route_randomly': %s", configVal[0])
 				}
 				rs.RouteRandomly = routeRandomly
+			default:
+				return d.Errf("unknown configuration key: %s", configKey)
 			}
 		}
 	}
