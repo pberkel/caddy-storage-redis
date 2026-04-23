@@ -1,21 +1,23 @@
-name: Go Unit Tests
+name: CI
 
 on:
+  push:
+    branches:
+      - main
   pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
-      - ready_for_review
+  workflow_dispatch:
 
 permissions:
   contents: read
 
 jobs:
-  unit-tests:
+  test:
+    name: Test
     runs-on: ubuntu-latest
+    timeout-minutes: 10
+
     steps:
-      - name: Checkout
+      - name: Check out repository
         uses: actions/checkout@v4
 
       - name: Set up Go
@@ -24,37 +26,11 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Check formatting
-        id: gofmt
-        continue-on-error: true
-        run: |
-          unformatted=$(gofmt -l .)
-          if [ -n "$unformatted" ]; then
-            echo "unformatted files: $unformatted"
-            exit 1
-          fi
+      - name: Verify formatting
+        run: test -z "$(gofmt -l .)"
 
-      - name: Report formatting failure without failing workflow
-        if: steps.gofmt.outcome == 'failure'
-        run: |
-          echo "::warning::gofmt check failed. This workflow is non-blocking by design."
-
-      - name: Run vet
-        id: govet
-        continue-on-error: true
+      - name: Run go vet
         run: go vet ./...
 
-      - name: Report vet failure without failing workflow
-        if: steps.govet.outcome == 'failure'
-        run: |
-          echo "::warning::go vet failed. This workflow is non-blocking by design."
-
-      - name: Run unit tests
-        id: unit_tests
-        continue-on-error: true
+      - name: Run tests
         run: go test ./...
-
-      - name: Report test failure without failing workflow
-        if: steps.unit_tests.outcome == 'failure'
-        run: |
-          echo "::warning::go test failed. This workflow is non-blocking by design."
