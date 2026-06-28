@@ -814,6 +814,9 @@ func (rs RedisStorage) String() string {
 	if rs.EncryptionKey != "" {
 		rs.EncryptionKey = redacted
 	}
+	if rs.SentinelPassword != "" {
+		rs.SentinelPassword = redacted
+	}
 	strVal, _ := json.Marshal(rs)
 	return string(strVal)
 }
