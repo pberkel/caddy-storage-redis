@@ -804,18 +804,18 @@ func (rs RedisStorage) splitDirectoryKey(key string, baseIsDir bool) (string, st
 }
 
 // String returns a JSON representation of the configuration with sensitive fields redacted.
-// The value receiver is intentional: Password and EncryptionKey are mutated on the copy
+// The value receiver is intentional: Password, SentinelPassword, and EncryptionKey are mutated on the copy
 // so the original struct is never modified.
 func (rs RedisStorage) String() string {
 	redacted := `REDACTED`
 	if rs.Password != "" {
 		rs.Password = redacted
 	}
-	if rs.EncryptionKey != "" {
-		rs.EncryptionKey = redacted
-	}
 	if rs.SentinelPassword != "" {
 		rs.SentinelPassword = redacted
+	}
+	if rs.EncryptionKey != "" {
+		rs.EncryptionKey = redacted
 	}
 	strVal, _ := json.Marshal(rs)
 	return string(strVal)

@@ -341,6 +341,23 @@ func TestRedisStorage_String(t *testing.T) {
 			assert.Empty(t, rs.Password)
 		})
 	})
+	t.Run("Validate sentinel password", func(t *testing.T) {
+		t.Run("is redacted when set", func(t *testing.T) {
+			testrs := New()
+			sentinelPassword := "iAmASuperSecureSentinelPassword"
+			rs.SentinelPassword = sentinelPassword
+			err := json.Unmarshal([]byte(rs.String()), &testrs)
+			assert.NoError(t, err)
+			assert.Equal(t, redacted, testrs.SentinelPassword)
+			assert.Equal(t, sentinelPassword, rs.SentinelPassword)
+		})
+		rs.SentinelPassword = ""
+		t.Run("is empty if not set", func(t *testing.T) {
+			err := json.Unmarshal([]byte(rs.String()), &rs)
+			assert.NoError(t, err)
+			assert.Empty(t, rs.SentinelPassword)
+		})
+	})
 	t.Run("Validate AES key", func(t *testing.T) {
 		t.Run("is redacted when set", func(t *testing.T) {
 			testrs := New()
