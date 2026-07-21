@@ -1,3 +1,9 @@
+# v1.8.1 (2026-07-21)
+
+### Bug fixes
+
+- **`sentinel_password` is now redacted in `String()`.** Previously, `SentinelPassword` was omitted from sensitive field redaction in the string representation of `RedisStorage`. It is now properly redacted alongside `Password` and `EncryptionKey`.
+
 # v1.8.0 (2026-03-31)
 
 ### New features
