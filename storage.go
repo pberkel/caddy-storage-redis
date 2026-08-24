@@ -395,12 +395,12 @@ func (rs RedisStorage) Store(ctx context.Context, key string, value []byte) erro
 	// Create directory structure set for current key
 	score := float64(sd.Modified.Unix())
 	if err := rs.storeDirectoryRecord(ctx, prefixedKey, score, false, false); err != nil {
-		return fmt.Errorf("Unable to create directory for key %s: %v", key, err)
+		return fmt.Errorf("Unable to create directory for key %s: %w", key, err)
 	}
 
 	// Store the key value in the Redis database
 	if err := rs.client.Set(ctx, prefixedKey, jsonValue, 0).Err(); err != nil {
-		return fmt.Errorf("Unable to set value for %s: %v", key, err)
+		return fmt.Errorf("Unable to set value for %s: %w", key, err)
 	}
 
 	return nil
@@ -443,11 +443,11 @@ func (rs RedisStorage) Delete(ctx context.Context, key string) error {
 
 	// Remove current key from directory structure
 	if err := rs.deleteDirectoryRecord(ctx, prefixedKey, false); err != nil {
-		return fmt.Errorf("Unable to delete directory for key %s: %v", key, err)
+		return fmt.Errorf("Unable to delete directory for key %s: %w", key, err)
 	}
 
 	if err := rs.client.Del(ctx, prefixedKey).Err(); err != nil {
-		return fmt.Errorf("Unable to delete key %s: %v", key, err)
+		return fmt.Errorf("Unable to delete key %s: %w", key, err)
 	}
 
 	return nil
@@ -490,7 +490,7 @@ func (rs RedisStorage) List(ctx context.Context, dir string, recursive bool) ([]
 	// Obtain range of all direct children stored in the Sorted Set
 	keys, err := rs.client.ZRange(ctx, currKey, 0, -1).Result()
 	if err != nil {
-		return keyList, fmt.Errorf("Unable to get range on sorted set '%s': %v", currKey, err)
+		return keyList, fmt.Errorf("Unable to get range on sorted set '%s': %w", currKey, err)
 	}
 
 	// Iterate over each child key
@@ -564,6 +564,9 @@ func (rs *RedisStorage) Lock(ctx context.Context, name string) error {
 						return
 					}
 					if err != nil && rs.logger != nil {
+						if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) || strings.Contains(err.Error(), "client is closed") {
+							return
+						}
 						rs.logger.Warnw("Failed to refresh lock, will retry", "key", key, "error", err)
 					}
 				}
@@ -599,6 +602,9 @@ func (rs *RedisStorage) Unlock(ctx context.Context, name string) error {
 
 			// release the Redis lock
 			if err := lock.lock.Release(ctx); err != nil {
+				if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, redislock.ErrNotObtained) || strings.Contains(err.Error(), "client is closed") {
+					return nil
+				}
 				return fmt.Errorf("Unable to release lock for %s: %v", key, err)
 			}
 		}
@@ -713,15 +719,17 @@ func (rs *RedisStorage) prefixLock(key string) string {
 func (rs RedisStorage) loadStorageData(ctx context.Context, key string) (*StorageData, error) {
 
 	data, err := rs.client.Get(ctx, rs.prefixKey(key)).Bytes()
-	if data == nil || errors.Is(err, redis.Nil) {
+	if errors.Is(err, redis.Nil) {
 		return nil, fs.ErrNotExist
 	} else if err != nil {
-		return nil, fmt.Errorf("Unable to get data for %s: %v", key, err)
+		return nil, fmt.Errorf("Unable to get data for %s: %w", key, err)
+	} else if data == nil {
+		return nil, fs.ErrNotExist
 	}
 
 	sd := &StorageData{}
 	if err := json.Unmarshal(data, sd); err != nil {
-		return nil, fmt.Errorf("Unable to unmarshal value for %s: %v", key, err)
+		return nil, fmt.Errorf("Unable to unmarshal value for %s: %w", key, err)
 	}
 
 	return sd, nil
@@ -740,7 +748,7 @@ func (rs RedisStorage) storeDirectoryRecord(ctx context.Context, key string, sco
 	// Insert "base" value into Set "dir"
 	success, err := rs.client.ZAdd(ctx, dir, redis.Z{Score: score, Member: base}).Result()
 	if err != nil {
-		return fmt.Errorf("Unable to add %s to Set %s: %v", base, dir, err)
+		return fmt.Errorf("Unable to add %s to Set %s: %w", base, dir, err)
 	}
 
 	// Non-zero success means base was added to the set (not already there)
@@ -771,7 +779,7 @@ func (rs RedisStorage) deleteDirectoryRecord(ctx context.Context, key string, ba
 
 	// Remove "base" value from Set "dir"
 	if err := rs.client.ZRem(ctx, dir, base).Err(); err != nil {
-		return fmt.Errorf("Unable to remove %s from Set %s: %v", base, dir, err)
+		return fmt.Errorf("Unable to remove %s from Set %s: %w", base, dir, err)
 	}
 
 	// Check if Set "dir" still exists (removing the last item deletes the set)

@@ -364,3 +364,38 @@ func TestRedisStorage_GetClient(t *testing.T) {
 	rs, _ := provisionRedisStorage(t)
 	assert.NotNil(t, rs.GetClient())
 }
+
+func TestRedisStorage_ContextCanceled(t *testing.T) {
+	rs, _ := provisionRedisStorage(t)
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := rs.Store(canceledCtx, TestKeyExampleCrt, TestValueCrt)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	_, err = rs.Load(canceledCtx, TestKeyExampleCrt)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	err = rs.Delete(canceledCtx, TestKeyExampleCrt)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	_, err = rs.List(canceledCtx, TestKeyCertPath, false)
+	assert.ErrorIs(t, err, context.Canceled)
+}
+
+func TestRedisStorage_UnlockClosedClient(t *testing.T) {
+	rs, ctx := provisionRedisStorage(t)
+
+	err := rs.Lock(ctx, TestKeyLock)
+	require.NoError(t, err)
+
+	// Close the underlying client
+	err = rs.Cleanup()
+	require.NoError(t, err)
+
+	// Unlock after client closed should succeed without error
+	err = rs.Unlock(ctx, TestKeyLock)
+	assert.NoError(t, err)
+}
+
