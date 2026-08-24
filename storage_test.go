@@ -398,4 +398,3 @@ func TestRedisStorage_UnlockClosedClient(t *testing.T) {
 	err = rs.Unlock(ctx, TestKeyLock)
 	assert.NoError(t, err)
 }
-
