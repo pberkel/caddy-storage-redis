@@ -563,8 +563,15 @@ func (rs *RedisStorage) Lock(ctx context.Context, name string) error {
 						// lock was lost (expired or released externally), stop refreshing
 						return
 					}
-					if err != nil && rs.logger != nil {
-						rs.logger.Warnw("Failed to refresh lock, will retry", "key", key, "error", err)
+					if err != nil {
+						if errors.Is(err, context.Canceled) || errors.Is(err, redis.ErrClosed) {
+							// shutting down (Unlock canceled refreshCtx, or the client
+							// was closed by Cleanup()) — exit quietly, nothing to report
+							return
+						}
+						if rs.logger != nil {
+							rs.logger.Warnw("Failed to refresh lock, will retry", "key", key, "error", err)
+						}
 					}
 				}
 			}(refreshCtx, lock)
@@ -597,8 +604,24 @@ func (rs *RedisStorage) Unlock(ctx context.Context, name string) error {
 		if lock, ok := syncMapLock.(heldLock); ok {
 			lock.cancel()
 
+			// Normally release with the caller's own context/deadline. If that
+			// context is already canceled (e.g. during a Caddy shutdown/reload),
+			// fall back to a short-lived, uncancelable context so release is
+			// still attempted instead of failing immediately.
+			relCtx := ctx
+			if ctx.Err() != nil {
+				var relCancel context.CancelFunc
+				relCtx, relCancel = context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+				defer relCancel()
+			}
+
 			// release the Redis lock
-			if err := lock.lock.Release(ctx); err != nil {
+			if err := lock.lock.Release(relCtx); err != nil {
+				if errors.Is(err, redislock.ErrLockNotHeld) || errors.Is(err, redis.ErrClosed) {
+					// lock already expired/released externally, or the client was
+					// closed by Cleanup() during shutdown — nothing more to do
+					return nil
+				}
 				return fmt.Errorf("Unable to release lock for %s: %w", key, err)
 			}
 		}
