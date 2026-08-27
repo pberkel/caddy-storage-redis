@@ -398,3 +398,52 @@ func TestRedisStorage_UnlockClosedClient(t *testing.T) {
 	err = rs.Unlock(ctx, TestKeyLock)
 	assert.NoError(t, err)
 }
+
+func TestRedisStorage_UnlockExpiredLock(t *testing.T) {
+	rs, ctx := provisionRedisStorage(t)
+
+	err := rs.Lock(ctx, TestKeyLock)
+	require.NoError(t, err)
+
+	// Delete the lock key directly in Redis to simulate lock expiration or external release
+	err = rs.client.Del(ctx, rs.prefixLock(TestKeyLock)).Err()
+	require.NoError(t, err)
+
+	// Unlock on an already-expired lock should succeed gracefully without error
+	err = rs.Unlock(ctx, TestKeyLock)
+	assert.NoError(t, err)
+}
+
+func TestRedisStorage_UnlockCanceledContext(t *testing.T) {
+	rs, ctx := provisionRedisStorage(t)
+
+	err := rs.Lock(ctx, TestKeyLock)
+	require.NoError(t, err)
+
+	// Unlock with a canceled context must still release the lock in Redis using WithoutCancel
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err = rs.Unlock(canceledCtx, TestKeyLock)
+	assert.NoError(t, err)
+
+	// Verify the lock was actually released in Redis
+	exists, err := rs.client.Exists(ctx, rs.prefixLock(TestKeyLock)).Result()
+	require.NoError(t, err)
+	assert.Equal(t, int64(0), exists, "lock key should have been removed from Redis")
+}
+
+func TestRedisStorage_LockRefreshExitWithNilLogger(t *testing.T) {
+	rs, ctx := provisionRedisStorage(t)
+	rs.logger = nil // test nil logger path
+
+	err := rs.Lock(ctx, TestKeyLock)
+	require.NoError(t, err)
+
+	// Close client to trigger refresh failure; refresh goroutine should exit cleanly without panicking
+	err = rs.Cleanup()
+	require.NoError(t, err)
+
+	err = rs.Unlock(ctx, TestKeyLock)
+	assert.NoError(t, err)
+}

@@ -469,7 +469,7 @@ func (rs RedisStorage) existsKey(ctx context.Context, key string) (bool, error) 
 	// Redis returns a count of the number of keys found
 	exists, err := rs.existsRawKey(ctx, rs.prefixKey(key))
 	if err != nil {
-		return false, fmt.Errorf("Unable to check existence for %s: %v", key, err)
+		return false, fmt.Errorf("Unable to check existence for %s: %w", key, err)
 	}
 	return exists, nil
 }
@@ -563,11 +563,13 @@ func (rs *RedisStorage) Lock(ctx context.Context, name string) error {
 						// lock was lost (expired or released externally), stop refreshing
 						return
 					}
-					if err != nil && rs.logger != nil {
-						if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) || strings.Contains(err.Error(), "client is closed") {
+					if err != nil {
+						if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, redis.ErrClosed) {
 							return
 						}
-						rs.logger.Warnw("Failed to refresh lock, will retry", "key", key, "error", err)
+						if rs.logger != nil {
+							rs.logger.Warnw("Failed to refresh lock, will retry", "key", key, "error", err)
+						}
 					}
 				}
 			}(refreshCtx, lock)
@@ -577,7 +579,7 @@ func (rs *RedisStorage) Lock(ctx context.Context, name string) error {
 
 		// check for unexpected error
 		if err != redislock.ErrNotObtained {
-			return fmt.Errorf("Unable to obtain lock for %s: %v", key, err)
+			return fmt.Errorf("Unable to obtain lock for %s: %w", key, err)
 		}
 
 		// lock already exists, wait and try again until cancelled
@@ -600,12 +602,16 @@ func (rs *RedisStorage) Unlock(ctx context.Context, name string) error {
 		if lock, ok := syncMapLock.(heldLock); ok {
 			lock.cancel()
 
-			// release the Redis lock
-			if err := lock.lock.Release(ctx); err != nil {
-				if errors.Is(err, context.Canceled) || errors.Is(ctx.Err(), context.Canceled) || errors.Is(err, redislock.ErrNotObtained) || strings.Contains(err.Error(), "client is closed") {
+			// release the Redis lock using context.WithoutCancel(ctx) with a short timeout
+			// so that release is still attempted even if ctx was canceled at shutdown
+			relCtx, relCancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+			defer relCancel()
+
+			if err := lock.lock.Release(relCtx); err != nil {
+				if errors.Is(err, redislock.ErrLockNotHeld) || errors.Is(err, redis.ErrClosed) {
 					return nil
 				}
-				return fmt.Errorf("Unable to release lock for %s: %v", key, err)
+				return fmt.Errorf("Unable to release lock for %s: %w", key, err)
 			}
 		}
 	}
@@ -627,7 +633,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 			// Scan for keys matching the search query and iterate until all found
 			keys, nextPointer, err := rs.client.Scan(ctx, pointer, currKey+"*", scanCount).Result()
 			if err != nil {
-				return fmt.Errorf("Unable to scan path %s: %v", currKey, err)
+				return fmt.Errorf("Unable to scan path %s: %w", currKey, err)
 			}
 
 			// Iterate over returned keys
@@ -651,7 +657,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 				// Repair directory structure set for current key
 				score := float64(sd.Modified.Unix())
 				if err := rs.storeDirectoryRecord(ctx, key, score, true, false); err != nil {
-					return fmt.Errorf("Unable to repair directory index for key '%s'", trimmedKey)
+					return fmt.Errorf("Unable to repair directory index for key '%s': %w", trimmedKey, err)
 				}
 			}
 
@@ -666,7 +672,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 	// Obtain range of all direct children stored in the Sorted Set
 	keys, err := rs.client.ZRange(ctx, currKey, 0, -1).Result()
 	if err != nil {
-		return fmt.Errorf("Unable to get range on sorted set '%s': %v", currKey, err)
+		return fmt.Errorf("Unable to get range on sorted set '%s': %w", currKey, err)
 	}
 
 	// Iterate over each child key
@@ -684,7 +690,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 		}
 		if !exists {
 			if err := rs.client.ZRem(ctx, currKey, k).Err(); err != nil {
-				return fmt.Errorf("Unable to remove stale record '%s' from directory '%s': %v", k, currKey, err)
+				return fmt.Errorf("Unable to remove stale record '%s' from directory '%s': %w", k, currKey, err)
 			}
 			if rs.logger != nil {
 				rs.logger.Infof("Removed non-existent record '%s' from directory '%s'", k, currKey)
@@ -785,7 +791,7 @@ func (rs RedisStorage) deleteDirectoryRecord(ctx context.Context, key string, ba
 	// Check if Set "dir" still exists (removing the last item deletes the set)
 	exists, err := rs.existsRawKey(ctx, dir)
 	if err != nil {
-		return fmt.Errorf("Unable to check existence for %s: %v", dir, err)
+		return fmt.Errorf("Unable to check existence for %s: %w", dir, err)
 	}
 	if !exists {
 		// Recursively delete parent directory until parent
