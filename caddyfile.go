@@ -345,13 +345,16 @@ func cmdRedisStorageRepair(fl caddycmd.Flags) (int, error) {
 	// Load configuration file (if not specified, will look in usual locations)
 	cfg, _, _, err := caddycmd.LoadConfig(configFile, "")
 	if err != nil {
-		return caddy.ExitCodeFailedStartup, fmt.Errorf("Unable to load config file: %v", err)
+		return caddy.ExitCodeFailedStartup, fmt.Errorf("Unable to load config file: %w", err)
 	}
 
 	// Unmarshall the storage configuration into a temporary struct
 	var storeCfg storageConfig
-	if err := json.Unmarshal(cfg, &storeCfg); err != nil || storeCfg.StorageRaw == nil {
-		return caddy.ExitCodeFailedStartup, fmt.Errorf("Unable to unmarshal configuration: %v", err)
+	if err := json.Unmarshal(cfg, &storeCfg); err != nil {
+		return caddy.ExitCodeFailedStartup, fmt.Errorf("Unable to unmarshal configuration: %w", err)
+	}
+	if storeCfg.StorageRaw == nil {
+		return caddy.ExitCodeFailedStartup, fmt.Errorf("Unable to unmarshal configuration: missing storage module")
 	}
 
 	ctx, cancel := caddy.NewContext(caddy.Context{Context: context.Background()})

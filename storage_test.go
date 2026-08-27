@@ -381,3 +381,22 @@ func TestRedisStorage_GetClient(t *testing.T) {
 	rs, _ := provisionRedisStorage(t)
 	assert.NotNil(t, rs.GetClient())
 }
+
+func TestRedisStorage_ContextCanceled(t *testing.T) {
+	rs, _ := provisionRedisStorage(t)
+
+	canceledCtx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := rs.Store(canceledCtx, TestKeyExampleCrt, TestValueCrt)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	_, err = rs.Load(canceledCtx, TestKeyExampleCrt)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	err = rs.Delete(canceledCtx, TestKeyExampleCrt)
+	assert.ErrorIs(t, err, context.Canceled)
+
+	_, err = rs.List(canceledCtx, TestKeyCertPath, false)
+	assert.ErrorIs(t, err, context.Canceled)
+}
