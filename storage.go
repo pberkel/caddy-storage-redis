@@ -277,7 +277,7 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 				var err error
 				pem, err = os.ReadFile(rs.TlsServerCertsPath)
 				if err != nil {
-					return fmt.Errorf("Failed to load PEM server certs from file %s: %v", rs.TlsServerCertsPath, err)
+					return fmt.Errorf("Failed to load PEM server certs from file %s: %w", rs.TlsServerCertsPath, err)
 				}
 			}
 
@@ -354,7 +354,7 @@ func (rs RedisStorage) Store(ctx context.Context, key string, value []byte) erro
 	if rs.Compression != CompressionNone {
 		compressedValue, err := rs.compress(value)
 		if err != nil {
-			return fmt.Errorf("Unable to compress value for %s: %v", key, err)
+			return fmt.Errorf("Unable to compress value for %s: %w", key, err)
 		}
 		// Check compression efficiency
 		if size > len(compressedValue) {
@@ -371,7 +371,7 @@ func (rs RedisStorage) Store(ctx context.Context, key string, value []byte) erro
 	if rs.EncryptionKey != "" {
 		encryptedValue, err := rs.encrypt(value)
 		if err != nil {
-			return fmt.Errorf("Unable to encrypt value for %s: %v", key, err)
+			return fmt.Errorf("Unable to encrypt value for %s: %w", key, err)
 		}
 		value = encryptedValue
 		encryptionFlag = 1
@@ -387,7 +387,7 @@ func (rs RedisStorage) Store(ctx context.Context, key string, value []byte) erro
 
 	jsonValue, err := json.Marshal(sd)
 	if err != nil {
-		return fmt.Errorf("Unable to marshal value for %s: %v", key, err)
+		return fmt.Errorf("Unable to marshal value for %s: %w", key, err)
 	}
 
 	var prefixedKey = rs.prefixKey(key)
@@ -395,12 +395,12 @@ func (rs RedisStorage) Store(ctx context.Context, key string, value []byte) erro
 	// Create directory structure set for current key
 	score := float64(sd.Modified.Unix())
 	if err := rs.storeDirectoryRecord(ctx, prefixedKey, score, false, false); err != nil {
-		return fmt.Errorf("Unable to create directory for key %s: %v", key, err)
+		return fmt.Errorf("Unable to create directory for key %s: %w", key, err)
 	}
 
 	// Store the key value in the Redis database
 	if err := rs.client.Set(ctx, prefixedKey, jsonValue, 0).Err(); err != nil {
-		return fmt.Errorf("Unable to set value for %s: %v", key, err)
+		return fmt.Errorf("Unable to set value for %s: %w", key, err)
 	}
 
 	return nil
@@ -422,7 +422,7 @@ func (rs RedisStorage) Load(ctx context.Context, key string) ([]byte, error) {
 	if sd.Encryption > 0 {
 		value, err = rs.decrypt(value)
 		if err != nil {
-			return nil, fmt.Errorf("Unable to decrypt value for %s: %v", key, err)
+			return nil, fmt.Errorf("Unable to decrypt value for %s: %w", key, err)
 		}
 	}
 
@@ -430,7 +430,7 @@ func (rs RedisStorage) Load(ctx context.Context, key string) ([]byte, error) {
 	if sd.Compression > storageCompressionNone {
 		value, err = rs.decompress(value, sd.Compression)
 		if err != nil {
-			return nil, fmt.Errorf("Unable to decompress value for %s: %v", key, err)
+			return nil, fmt.Errorf("Unable to decompress value for %s: %w", key, err)
 		}
 	}
 
@@ -443,11 +443,11 @@ func (rs RedisStorage) Delete(ctx context.Context, key string) error {
 
 	// Remove current key from directory structure
 	if err := rs.deleteDirectoryRecord(ctx, prefixedKey, false); err != nil {
-		return fmt.Errorf("Unable to delete directory for key %s: %v", key, err)
+		return fmt.Errorf("Unable to delete directory for key %s: %w", key, err)
 	}
 
 	if err := rs.client.Del(ctx, prefixedKey).Err(); err != nil {
-		return fmt.Errorf("Unable to delete key %s: %v", key, err)
+		return fmt.Errorf("Unable to delete key %s: %w", key, err)
 	}
 
 	return nil
@@ -469,7 +469,7 @@ func (rs RedisStorage) existsKey(ctx context.Context, key string) (bool, error) 
 	// Redis returns a count of the number of keys found
 	exists, err := rs.existsRawKey(ctx, rs.prefixKey(key))
 	if err != nil {
-		return false, fmt.Errorf("Unable to check existence for %s: %v", key, err)
+		return false, fmt.Errorf("Unable to check existence for %s: %w", key, err)
 	}
 	return exists, nil
 }
@@ -490,7 +490,7 @@ func (rs RedisStorage) List(ctx context.Context, dir string, recursive bool) ([]
 	// Obtain range of all direct children stored in the Sorted Set
 	keys, err := rs.client.ZRange(ctx, currKey, 0, -1).Result()
 	if err != nil {
-		return keyList, fmt.Errorf("Unable to get range on sorted set '%s': %v", currKey, err)
+		return keyList, fmt.Errorf("Unable to get range on sorted set '%s': %w", currKey, err)
 	}
 
 	// Iterate over each child key
@@ -574,7 +574,7 @@ func (rs *RedisStorage) Lock(ctx context.Context, name string) error {
 
 		// check for unexpected error
 		if err != redislock.ErrNotObtained {
-			return fmt.Errorf("Unable to obtain lock for %s: %v", key, err)
+			return fmt.Errorf("Unable to obtain lock for %s: %w", key, err)
 		}
 
 		// lock already exists, wait and try again until cancelled
@@ -599,7 +599,7 @@ func (rs *RedisStorage) Unlock(ctx context.Context, name string) error {
 
 			// release the Redis lock
 			if err := lock.lock.Release(ctx); err != nil {
-				return fmt.Errorf("Unable to release lock for %s: %v", key, err)
+				return fmt.Errorf("Unable to release lock for %s: %w", key, err)
 			}
 		}
 	}
@@ -621,7 +621,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 			// Scan for keys matching the search query and iterate until all found
 			keys, nextPointer, err := rs.client.Scan(ctx, pointer, currKey+"*", scanCount).Result()
 			if err != nil {
-				return fmt.Errorf("Unable to scan path %s: %v", currKey, err)
+				return fmt.Errorf("Unable to scan path %s: %w", currKey, err)
 			}
 
 			// Iterate over returned keys
@@ -645,7 +645,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 				// Repair directory structure set for current key
 				score := float64(sd.Modified.Unix())
 				if err := rs.storeDirectoryRecord(ctx, key, score, true, false); err != nil {
-					return fmt.Errorf("Unable to repair directory index for key '%s'", trimmedKey)
+					return fmt.Errorf("Unable to repair directory index for key '%s': %w", trimmedKey, err)
 				}
 			}
 
@@ -660,7 +660,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 	// Obtain range of all direct children stored in the Sorted Set
 	keys, err := rs.client.ZRange(ctx, currKey, 0, -1).Result()
 	if err != nil {
-		return fmt.Errorf("Unable to get range on sorted set '%s': %v", currKey, err)
+		return fmt.Errorf("Unable to get range on sorted set '%s': %w", currKey, err)
 	}
 
 	// Iterate over each child key
@@ -678,7 +678,7 @@ func (rs *RedisStorage) Repair(ctx context.Context, dir string) error {
 		}
 		if !exists {
 			if err := rs.client.ZRem(ctx, currKey, k).Err(); err != nil {
-				return fmt.Errorf("Unable to remove stale record '%s' from directory '%s': %v", k, currKey, err)
+				return fmt.Errorf("Unable to remove stale record '%s' from directory '%s': %w", k, currKey, err)
 			}
 			if rs.logger != nil {
 				rs.logger.Infof("Removed non-existent record '%s' from directory '%s'", k, currKey)
@@ -713,15 +713,17 @@ func (rs *RedisStorage) prefixLock(key string) string {
 func (rs RedisStorage) loadStorageData(ctx context.Context, key string) (*StorageData, error) {
 
 	data, err := rs.client.Get(ctx, rs.prefixKey(key)).Bytes()
-	if data == nil || errors.Is(err, redis.Nil) {
+	if errors.Is(err, redis.Nil) {
 		return nil, fs.ErrNotExist
 	} else if err != nil {
-		return nil, fmt.Errorf("Unable to get data for %s: %v", key, err)
+		return nil, fmt.Errorf("Unable to get data for %s: %w", key, err)
+	} else if data == nil {
+		return nil, fs.ErrNotExist
 	}
 
 	sd := &StorageData{}
 	if err := json.Unmarshal(data, sd); err != nil {
-		return nil, fmt.Errorf("Unable to unmarshal value for %s: %v", key, err)
+		return nil, fmt.Errorf("Unable to unmarshal value for %s: %w", key, err)
 	}
 
 	return sd, nil
@@ -740,7 +742,7 @@ func (rs RedisStorage) storeDirectoryRecord(ctx context.Context, key string, sco
 	// Insert "base" value into Set "dir"
 	success, err := rs.client.ZAdd(ctx, dir, redis.Z{Score: score, Member: base}).Result()
 	if err != nil {
-		return fmt.Errorf("Unable to add %s to Set %s: %v", base, dir, err)
+		return fmt.Errorf("Unable to add %s to Set %s: %w", base, dir, err)
 	}
 
 	// Non-zero success means base was added to the set (not already there)
@@ -771,13 +773,13 @@ func (rs RedisStorage) deleteDirectoryRecord(ctx context.Context, key string, ba
 
 	// Remove "base" value from Set "dir"
 	if err := rs.client.ZRem(ctx, dir, base).Err(); err != nil {
-		return fmt.Errorf("Unable to remove %s from Set %s: %v", base, dir, err)
+		return fmt.Errorf("Unable to remove %s from Set %s: %w", base, dir, err)
 	}
 
 	// Check if Set "dir" still exists (removing the last item deletes the set)
 	exists, err := rs.existsRawKey(ctx, dir)
 	if err != nil {
-		return fmt.Errorf("Unable to check existence for %s: %v", dir, err)
+		return fmt.Errorf("Unable to check existence for %s: %w", dir, err)
 	}
 	if !exists {
 		// Recursively delete parent directory until parent
