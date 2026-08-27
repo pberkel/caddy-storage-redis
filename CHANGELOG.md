@@ -1,3 +1,12 @@
+# v1.8.2 (2026-08-28)
+
+### Bug fixes
+
+- **`Lock`/`Unlock` no longer log spurious errors during Caddy shutdown or config reload.** Previously, when `Cleanup()` closed the Redis connection pool while a background lock-refresh goroutine or an in-flight `Unlock()` was still running, this produced noisy `Failed to refresh lock` / `client is closed` warnings. The refresh goroutine now exits quietly on a canceled context or closed client, and `Unlock()` treats an already-expired or externally-released lock as success rather than an error.
+- **Errors from storage operations are now wrapped with `%w`, enabling `errors.Is`/`errors.As`.** Most errors were previously formatted with `%v`, which discards the underlying error and prevents callers (e.g. CertMagic, Caddy) from inspecting error chains for conditions like `context.Canceled` or `fs.ErrNotExist`.
+- **`Load()` no longer misreports real Redis errors as "file does not exist".** A `nil` result from Redis was previously treated as `fs.ErrNotExist` regardless of the actual error returned (including e.g. a canceled context), silently swallowing legitimate errors.
+- **`redis repair` no longer produces a garbled error when the config has no storage module configured.** This case was previously conflated with a JSON parse failure, formatting a `nil` error with `%w`.
+
 # v1.8.1 (2026-07-21)
 
 ### Bug fixes
