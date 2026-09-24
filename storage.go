@@ -130,10 +130,11 @@ type RedisStorage struct {
 	// RouteRandomly Route commands randomly, only used in Cluster mode. Default: false
 	RouteRandomly bool `json:"route_randomly"`
 
-	client redis.UniversalClient
-	locker *redislock.Client
-	logger *zap.SugaredLogger
-	locks  *sync.Map
+	client         redis.UniversalClient
+	clientLifetime *clientLifetime
+	locker         *redislock.Client
+	logger         *zap.SugaredLogger
+	locks          *sync.Map
 }
 
 // CompressionMode specifies the compression algorithm used when storing values.
@@ -341,6 +342,7 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 	// Create new redislock client
 	rs.locker = redislock.New(rs.client)
 	rs.locks = &sync.Map{}
+	rs.clientLifetime = &clientLifetime{client: rs.client, refs: 1}
 	return nil
 }
 
@@ -851,6 +853,7 @@ func (rs RedisStorage) String() string {
 // This is useful for other modules that need to interact with the same Redis instance.
 // The return type of GetClient is "any" for forward-compatibility new versions of go-redis.
 // The returned value must usually be cast to redis.UniversalClient.
+// It must not be closed by the caller and is only valid until Cleanup; use AcquireClient to retain it longer.
 func (rs *RedisStorage) GetClient() any {
 	return rs.client
 }

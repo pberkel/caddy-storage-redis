@@ -242,6 +242,23 @@ You can also use the `tls_server_certs_pem` option to provide one or more PEM en
 ```
 If you prefer not to put certificates in your Caddyfile, you can also put the series of PEM certificates into a file and use `tls_server_certs_path` to point Caddy at it.
 
+## Sharing the Redis client with other modules
+
+After storage provisioning, `AcquireClient()` returns the existing client, an idempotent release function, and an error. This lets a consumer such as a pooled Mercure transport keep using the client after Caddy unloads the storage configuration:
+
+```go
+value, release, err := storage.AcquireClient()
+if err != nil {
+    return err
+}
+client := value.(redis.UniversalClient)
+// Retain client and release for the consumer's lifetime.
+```
+
+Call `release()` when the consumer has finished all Redis operations, and handle its returned error. Do not call `client.Close()` directly. Storage cleanup releases its own reference; the client closes only after storage and all consumers have released theirs. Acquisition after cleanup returns `ErrClientUnavailable`, even while existing consumers still hold references.
+
+Each acquisition refers to that storage instance's client. If connection settings change on reload, acquire from the newly provisioned storage instance. `GetClient()` remains available for callers whose use ends before storage cleanup; it does not retain the client.
+
 ## Maintenance
 
 This module has been architected to maintain a hierarchical index of storage items using Redis Sorted Sets to optimize directory listing operations typically used by Caddy.  It is possible for this index structure to become corrupted in the event of an unexpected system crash or loss of power.  If you suspect your Caddy storage has been corrupted, it is possible to repair this index structure from the command line by issuing the following command:

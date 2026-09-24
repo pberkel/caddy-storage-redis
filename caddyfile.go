@@ -326,9 +326,12 @@ func normalizeKeyPrefix(prefix string) (string, error) {
 }
 
 func (rs *RedisStorage) Cleanup() error {
-	// Close the Redis connection
+	if rs.clientLifetime != nil {
+		return rs.clientLifetime.cleanup()
+	}
+
 	if rs.client != nil {
-		rs.client.Close()
+		return rs.client.Close()
 	}
 
 	return nil
