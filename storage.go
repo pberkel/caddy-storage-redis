@@ -129,6 +129,8 @@ type RedisStorage struct {
 	RouteByLatency bool `json:"route_by_latency"`
 	// RouteRandomly Route commands randomly, only used in Cluster mode. Default: false
 	RouteRandomly bool `json:"route_randomly"`
+	// ClientName The connection name set with CLIENT SETNAME, visible in CLIENT LIST. Default: "" (unnamed)
+	ClientName string `json:"client_name"`
 
 	client redis.UniversalClient
 	locker *redislock.Client
@@ -242,6 +244,7 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 		Username:   rs.Username,
 		Password:   rs.Password,
 		DB:         dbInt,
+		ClientName: rs.ClientName,
 	}
 
 	// Configure timeout values if defined
