@@ -129,11 +129,17 @@ type RedisStorage struct {
 	RouteByLatency bool `json:"route_by_latency"`
 	// RouteRandomly Route commands randomly, only used in Cluster mode. Default: false
 	RouteRandomly bool `json:"route_randomly"`
+	// ClientShutdownGracePeriod keeps the Redis client available after this instance
+	// is cleaned up so background operations can finish. Default: "10s".
+	ClientShutdownGracePeriod string `json:"client_shutdown_grace_period,omitempty"`
 
-	client redis.UniversalClient
-	locker *redislock.Client
-	logger *zap.SugaredLogger
-	locks  *sync.Map
+	client                            redis.UniversalClient
+	locker                            *redislock.Client
+	logger                            *zap.SugaredLogger
+	locks                             *sync.Map
+	poolKeyVal                        poolIdentity
+	clientShutdownGracePeriodDuration time.Duration
+	clientLifetime                    *clientLifetime
 }
 
 // CompressionMode specifies the compression algorithm used when storing values.
@@ -217,20 +223,49 @@ type StorageData struct {
 func New() *RedisStorage {
 
 	rs := RedisStorage{
-		ClientType:  defaultClientType,
-		Host:        []string{defaultHost},
-		Port:        []string{defaultPort},
-		DB:          DBIndex(defaultDb),
-		KeyPrefix:   defaultKeyPrefix,
-		Compression: CompressionNone,
-		TlsEnabled:  defaultTLS,
-		TlsInsecure: defaultTLSInsecure,
+		ClientType:                defaultClientType,
+		Host:                      []string{defaultHost},
+		Port:                      []string{defaultPort},
+		DB:                        DBIndex(defaultDb),
+		KeyPrefix:                 defaultKeyPrefix,
+		Compression:               CompressionNone,
+		TlsEnabled:                defaultTLS,
+		TlsInsecure:               defaultTLSInsecure,
+		ClientShutdownGracePeriod: defaultClientShutdownGracePeriodStr,
+		clientLifetime:            new(clientLifetime),
 	}
 	return &rs
 }
 
-// Initialize Redis client and locker
-func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
+func (rs *RedisStorage) resolveTLSConfig() (*tls.Config, string, error) {
+	if !rs.TlsEnabled {
+		return nil, "", nil
+	}
+	if rs.TlsServerCertsPEM != "" && rs.TlsServerCertsPath != "" {
+		return nil, "", fmt.Errorf("Cannot specify TlsServerCertsPEM alongside TlsServerCertsPath")
+	}
+
+	cfg := &tls.Config{InsecureSkipVerify: rs.TlsInsecure}
+	pemBytes := []byte(rs.TlsServerCertsPEM)
+	if rs.TlsServerCertsPath != "" {
+		var err error
+		pemBytes, err = os.ReadFile(rs.TlsServerCertsPath)
+		if err != nil {
+			return nil, "", fmt.Errorf("Failed to load PEM server certs from file %s: %w", rs.TlsServerCertsPath, err)
+		}
+	}
+	if rs.TlsServerCertsPEM != "" || rs.TlsServerCertsPath != "" {
+		roots := x509.NewCertPool()
+		if !roots.AppendCertsFromPEM(pemBytes) {
+			return nil, "", fmt.Errorf("Failed to load PEM server certs")
+		}
+		cfg.RootCAs = roots
+	}
+	return cfg, string(pemBytes), nil
+}
+
+// createRedisClient creates and validates a new Redis client instance based on configuration
+func (rs *RedisStorage) createRedisClient(ctx context.Context, tlsConfig *tls.Config) (redis.UniversalClient, error) {
 
 	// DB was validated in finalizeConfiguration; parse is safe here
 	dbInt, _ := strconv.Atoi(string(rs.DB))
@@ -242,6 +277,7 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 		Username:   rs.Username,
 		Password:   rs.Password,
 		DB:         dbInt,
+		TLSConfig:  tlsConfig,
 	}
 
 	// Configure timeout values if defined
@@ -259,41 +295,12 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 		clientOpts.RouteRandomly = rs.RouteRandomly
 	}
 
-	// Configure TLS support if enabled
-	if rs.TlsEnabled {
-		clientOpts.TLSConfig = &tls.Config{
-			InsecureSkipVerify: rs.TlsInsecure,
-		}
-
-		if len(rs.TlsServerCertsPEM) > 0 && len(rs.TlsServerCertsPath) > 0 {
-			return fmt.Errorf("Cannot specify TlsServerCertsPEM alongside TlsServerCertsPath")
-		}
-
-		if len(rs.TlsServerCertsPEM) > 0 || len(rs.TlsServerCertsPath) > 0 {
-			certPool := x509.NewCertPool()
-			pem := []byte(rs.TlsServerCertsPEM)
-
-			if len(rs.TlsServerCertsPath) > 0 {
-				var err error
-				pem, err = os.ReadFile(rs.TlsServerCertsPath)
-				if err != nil {
-					return fmt.Errorf("Failed to load PEM server certs from file %s: %w", rs.TlsServerCertsPath, err)
-				}
-			}
-
-			if !certPool.AppendCertsFromPEM(pem) {
-				return fmt.Errorf("Failed to load PEM server certs")
-			}
-
-			clientOpts.TLSConfig.RootCAs = certPool
-		}
-	}
-
 	// Create appropriate Redis client type
 	if rs.ClientType == "failover" && clientOpts.MasterName == "" {
-		return fmt.Errorf("'master_name' is required when using 'failover' client type")
+		return nil, fmt.Errorf("'master_name' is required when using 'failover' client type")
 	}
 
+	var client redis.UniversalClient
 	if rs.ClientType == "failover" {
 
 		if rs.SentinelPassword != "" {
@@ -308,9 +315,10 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 			return shard.Ping(ctx).Err()
 		})
 		if err != nil {
-			return err
+			_ = clusterClient.Close()
+			return nil, err
 		}
-		rs.client = clusterClient
+		client = clusterClient
 
 	} else if rs.ClientType == "cluster" || len(clientOpts.Addrs) > 1 {
 
@@ -322,25 +330,56 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 			return shard.Ping(ctx).Err()
 		})
 		if err != nil {
-			return err
+			_ = clusterClient.Close()
+			return nil, err
 		}
-		rs.client = clusterClient
+		client = clusterClient
 
 	} else {
 
 		// Create new Redis simple standalone client
-		rs.client = redis.NewClient(clientOpts.Simple())
+		c := redis.NewClient(clientOpts.Simple())
 
 		// Test connection to the Redis server
-		err := rs.client.Ping(ctx).Err()
+		err := c.Ping(ctx).Err()
 		if err != nil {
-			return err
+			_ = c.Close()
+			return nil, err
 		}
+		client = c
 	}
 
-	// Create new redislock client
-	rs.locker = redislock.New(rs.client)
+	return client, nil
+}
+
+// Initialize Redis client and locker using reference-counted pool
+func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
+	tlsConfig, resolvedPEM, err := rs.resolveTLSConfig()
+	if err != nil {
+		return err
+	}
+	key := rs.poolKey()
+	key.TlsTrustPEM = resolvedPEM
 	rs.locks = &sync.Map{}
+	if rs.clientLifetime == nil {
+		rs.clientLifetime = new(clientLifetime)
+	}
+
+	client, locker, err := defaultPool.acquire(key, rs.logger, func() (redis.UniversalClient, *redislock.Client, error) {
+		c, err := rs.createRedisClient(ctx, tlsConfig)
+		if err != nil {
+			return nil, nil, err
+		}
+		l := redislock.New(c)
+		return c, l, nil
+	})
+	if err != nil {
+		return err
+	}
+
+	rs.client = client
+	rs.locker = locker
+	rs.poolKeyVal = key
 	return nil
 }
 
@@ -851,6 +890,7 @@ func (rs RedisStorage) String() string {
 // This is useful for other modules that need to interact with the same Redis instance.
 // The return type of GetClient is "any" for forward-compatibility new versions of go-redis.
 // The returned value must usually be cast to redis.UniversalClient.
+// The caller must not close it. Use AcquireClient to retain it beyond Cleanup.
 func (rs *RedisStorage) GetClient() any {
 	return rs.client
 }

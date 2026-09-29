@@ -22,6 +22,7 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -176,6 +177,8 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.Errf("invalid boolean value for 'route_randomly': %s", configVal[0])
 				}
 				rs.RouteRandomly = routeRandomly
+			case "client_shutdown_grace_period":
+				rs.ClientShutdownGracePeriod = configVal[0]
 			default:
 				return d.Errf("unknown configuration key: %s", configKey)
 			}
@@ -276,6 +279,24 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 		return fmt.Errorf("invalid db value: %s", rs.DB)
 	}
 
+	rs.ClientShutdownGracePeriod = repl.ReplaceAll(rs.ClientShutdownGracePeriod, defaultClientShutdownGracePeriodStr)
+	if rs.ClientShutdownGracePeriod != "" {
+		d, err := caddy.ParseDuration(rs.ClientShutdownGracePeriod)
+		if err != nil {
+			if secs, errSec := strconv.Atoi(rs.ClientShutdownGracePeriod); errSec == nil && secs >= 0 {
+				d = time.Duration(secs) * time.Second
+			} else {
+				return fmt.Errorf("invalid client_shutdown_grace_period value: %s", rs.ClientShutdownGracePeriod)
+			}
+		}
+		if d < 0 {
+			return fmt.Errorf("invalid client_shutdown_grace_period value: %s", rs.ClientShutdownGracePeriod)
+		}
+		rs.clientShutdownGracePeriodDuration = d
+	} else {
+		rs.clientShutdownGracePeriodDuration = defaultClientShutdownGracePeriod
+	}
+
 	// TODO: these are non-string fields so they can't easily be substituted at runtime :(
 	// rs.TlsEnabled
 	// rs.TlsInsecure
@@ -326,12 +347,22 @@ func normalizeKeyPrefix(prefix string) (string, error) {
 }
 
 func (rs *RedisStorage) Cleanup() error {
-	// Close the Redis connection
-	if rs.client != nil {
-		rs.client.Close()
+	lifetime := rs.clientLifetime
+	if lifetime == nil {
+		return nil
 	}
+	lifetime.cleanupOnce.Do(func() {
+		lifetime.mu.Lock()
+		lifetime.cleaned = true
+		lifetime.mu.Unlock()
 
-	return nil
+		if rs.poolKeyVal != (poolIdentity{}) {
+			lifetime.cleanupErr = defaultPool.release(rs.poolKeyVal, rs.clientShutdownGracePeriodDuration, rs.logger)
+		} else if rs.client != nil {
+			lifetime.cleanupErr = rs.client.Close()
+		}
+	})
+	return lifetime.cleanupErr
 }
 
 type storageConfig struct {
