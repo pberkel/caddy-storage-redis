@@ -139,7 +139,7 @@ type RedisStorage struct {
 	locks                             *sync.Map
 	poolKeyVal                        poolIdentity
 	clientShutdownGracePeriodDuration time.Duration
-	cleanupOnce                       *sync.Once
+	clientLifetime                    *clientLifetime
 }
 
 // CompressionMode specifies the compression algorithm used when storing values.
@@ -232,7 +232,7 @@ func New() *RedisStorage {
 		TlsEnabled:                defaultTLS,
 		TlsInsecure:               defaultTLSInsecure,
 		ClientShutdownGracePeriod: defaultClientShutdownGracePeriodStr,
-		cleanupOnce:               new(sync.Once),
+		clientLifetime:            new(clientLifetime),
 	}
 	return &rs
 }
@@ -361,8 +361,8 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 	key := rs.poolKey()
 	key.TlsTrustPEM = resolvedPEM
 	rs.locks = &sync.Map{}
-	if rs.cleanupOnce == nil {
-		rs.cleanupOnce = new(sync.Once)
+	if rs.clientLifetime == nil {
+		rs.clientLifetime = new(clientLifetime)
 	}
 
 	client, locker, err := defaultPool.acquire(key, rs.logger, func() (redis.UniversalClient, *redislock.Client, error) {
@@ -890,6 +890,7 @@ func (rs RedisStorage) String() string {
 // This is useful for other modules that need to interact with the same Redis instance.
 // The return type of GetClient is "any" for forward-compatibility new versions of go-redis.
 // The returned value must usually be cast to redis.UniversalClient.
+// The caller must not close it. Use AcquireClient to retain it beyond Cleanup.
 func (rs *RedisStorage) GetClient() any {
 	return rs.client
 }

@@ -143,11 +143,22 @@ func (p *redisClientPool) acquire(
 	return client, locker, nil
 }
 
+func (p *redisClientPool) retain(key poolIdentity) bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	entry, exists := p.entries[key]
+	if !exists || entry.refCount == 0 {
+		return false
+	}
+	entry.refCount++
+	return true
+}
+
 func (p *redisClientPool) release(
 	key poolIdentity,
 	clientShutdownGracePeriod time.Duration,
 	logger *zap.SugaredLogger,
-) {
+) error {
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
 	}
@@ -156,7 +167,7 @@ func (p *redisClientPool) release(
 	entry, exists := p.entries[key]
 	if !exists {
 		p.mu.Unlock()
-		return
+		return nil
 	}
 
 	// Preserve each released owner's deadline, even while other owners remain.
@@ -169,7 +180,7 @@ func (p *redisClientPool) release(
 
 	if entry.refCount > 0 {
 		p.mu.Unlock()
-		return
+		return nil
 	}
 
 	entry.timerGeneration++
@@ -182,11 +193,12 @@ func (p *redisClientPool) release(
 	if delay <= 0 {
 		delete(p.entries, key)
 		p.mu.Unlock()
-		if err := entry.client.Close(); err != nil {
+		err := entry.client.Close()
+		if err != nil {
 			logger.Warnf("Error closing Redis client (%s): %v", key, err)
 		}
 		logger.Debugf("Closed Redis client immediately (%s)", key)
-		return
+		return err
 	}
 
 	logger.Debugf("Scheduled delayed shutdown for Redis client (%s) in %v", key, delay)
@@ -195,6 +207,7 @@ func (p *redisClientPool) release(
 		p.closeIdleClient(key, entry, generation, logger)
 	})
 	p.mu.Unlock()
+	return nil
 }
 
 func (p *redisClientPool) closeIdleClient(key poolIdentity, entry *pooledClientEntry, generation uint64, logger *zap.SugaredLogger) {

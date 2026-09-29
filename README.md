@@ -246,6 +246,31 @@ You can also use the `tls_server_certs_pem` option to provide one or more PEM en
 ```
 If you prefer not to put certificates in your Caddyfile, you can also put the series of PEM certificates into a file and use `tls_server_certs_path` to point Caddy at it.
 
+## Sharing the Redis client with other modules
+
+After provisioning, `AcquireClient()` returns the existing client and an idempotent release function. Use it when a consumer, such as a pooled transport, can outlive the storage configuration. A Caddy module can assert the API on the `certmagic.Storage` returned by `ctx.Storage()`:
+
+```go
+storage, ok := ctx.Storage().(interface {
+    AcquireClient() (any, func() error, error)
+})
+if !ok {
+    return fmt.Errorf("configured storage does not support retaining Redis clients")
+}
+value, release, err := storage.AcquireClient()
+if err != nil {
+    return err
+}
+client := value.(redis.UniversalClient)
+// Keep client and release until the consumer has finished all Redis operations.
+```
+
+Call `release()` when the consumer closes, and handle its returned error. Never call `client.Close()` directly. Each acquisition holds a reference in the shared pool, keeping the client alive even after storage cleanup and beyond `client_shutdown_grace_period`. Acquisition after cleanup returns `ErrClientUnavailable`; existing acquisitions remain valid until released.
+
+Storage cleanup starts that instance's shutdown grace period. A consumer's release does not add another grace period. The client closes only when all storage and consumer references have been released and all storage shutdown deadlines have elapsed. Immediate close errors are returned by `release()` or `Cleanup()`; delayed close errors are logged. Repeated calls return the same result without releasing another reference.
+
+A retained client keeps its original connection settings. After credentials, TLS trust, or other connection settings change, acquire from the newly provisioned storage instance to use them. `GetClient()` remains available without retaining a reference; callers using it must finish before storage cleanup.
+
 ## Maintenance
 
 This module has been architected to maintain a hierarchical index of storage items using Redis Sorted Sets to optimize directory listing operations typically used by Caddy.  It is possible for this index structure to become corrupted in the event of an unexpected system crash or loss of power.  If you suspect your Caddy storage has been corrupted, it is possible to repair this index structure from the command line by issuing the following command:

@@ -43,8 +43,7 @@ import (
 	"go.uber.org/zap"
 )
 
-func TestRedisStorage_FailedPingClosesClient(t *testing.T) {
-	mr := miniredis.RunT(t)
+func denyRedisPing(mr *miniredis.Miniredis) {
 	mr.Server().SetPreHook(func(p *server.Peer, cmd string, args ...string) bool {
 		if strings.EqualFold(cmd, "ping") {
 			p.WriteError("NOPERM PING denied")
@@ -52,6 +51,11 @@ func TestRedisStorage_FailedPingClosesClient(t *testing.T) {
 		}
 		return false
 	})
+}
+
+func TestRedisStorage_FailedPingClosesClient(t *testing.T) {
+	mr := miniredis.RunT(t)
+	denyRedisPing(mr)
 	for i := 0; i < 3; i++ {
 		rs := New()
 		rs.Address = []string{mr.Addr()}
