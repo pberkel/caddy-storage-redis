@@ -289,6 +289,9 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 				return fmt.Errorf("invalid client_shutdown_grace_period value: %s", rs.ClientShutdownGracePeriod)
 			}
 		}
+		if d < 0 {
+			return fmt.Errorf("invalid client_shutdown_grace_period value: %s", rs.ClientShutdownGracePeriod)
+		}
 		rs.clientShutdownGracePeriodDuration = d
 	} else {
 		rs.clientShutdownGracePeriodDuration = defaultClientShutdownGracePeriod

@@ -402,12 +402,14 @@ func TestRedisStorage_ClientShutdownGracePeriodConfiguration(t *testing.T) {
 	})
 
 	t.Run("invalid client_shutdown_grace_period rejected", func(t *testing.T) {
-		rs := New()
-		rs.Address = []string{mr.Addr()}
-		rs.ClientShutdownGracePeriod = "invalid-duration"
-		err := rs.finalizeConfiguration(context.Background())
-		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid client_shutdown_grace_period value")
+		for _, value := range []string{"invalid-duration", "-5s", "-1ns", "-5"} {
+			rs := New()
+			rs.Address = []string{mr.Addr()}
+			rs.ClientShutdownGracePeriod = value
+			err := rs.finalizeConfiguration(context.Background())
+			require.Error(t, err, value)
+			assert.Contains(t, err.Error(), "invalid client_shutdown_grace_period value", value)
+		}
 	})
 
 	t.Run("caddyfile unmarshals client_shutdown_grace_period", func(t *testing.T) {
