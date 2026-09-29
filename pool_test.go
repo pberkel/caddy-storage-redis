@@ -69,7 +69,7 @@ func TestClientPool_ReferenceCounting(t *testing.T) {
 	assert.Equal(t, 1, pool.getRefCount(key))
 	assert.NoError(t, c1.Ping(context.Background()).Err())
 
-	// Second release with gracePeriod 0: client closed immediately, entry deleted
+	// Second release with clientShutdownGracePeriod 0: client closed immediately, entry deleted
 	pool.release(key, 0, nil)
 	assert.Equal(t, 0, pool.getRefCount(key))
 	assert.Equal(t, 0, pool.len())
@@ -93,8 +93,8 @@ func TestClientPool_DelayedShutdown(t *testing.T) {
 	client, _, err := pool.acquire(key, nil, factory)
 	require.NoError(t, err)
 
-	gracePeriod := 80 * time.Millisecond
-	pool.release(key, gracePeriod, nil)
+	clientShutdownGracePeriod := 80 * time.Millisecond
+	pool.release(key, clientShutdownGracePeriod, nil)
 
 	// Immediately after release: refCount is 0, but timer is active and client still works
 	assert.Equal(t, 0, pool.getRefCount(key))
@@ -102,14 +102,14 @@ func TestClientPool_DelayedShutdown(t *testing.T) {
 	assert.NoError(t, client.Ping(context.Background()).Err())
 
 	// Wait for grace period to expire plus buffer
-	time.Sleep(gracePeriod + 50*time.Millisecond)
+	time.Sleep(clientShutdownGracePeriod + 50*time.Millisecond)
 
 	// Entry must now be removed from pool and client closed
 	assert.Equal(t, 0, pool.len())
 	assert.Error(t, client.Ping(context.Background()).Err())
 }
 
-func TestClientPool_ReacquireDuringGracePeriod(t *testing.T) {
+func TestClientPool_ReacquireDuringClientShutdownGracePeriod(t *testing.T) {
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
 	defer mr.Close()
@@ -130,8 +130,8 @@ func TestClientPool_ReacquireDuringGracePeriod(t *testing.T) {
 	assert.Equal(t, int32(1), atomic.LoadInt32(&factoryCalls))
 
 	// Release with 150ms grace period
-	gracePeriod := 150 * time.Millisecond
-	pool.release(key, gracePeriod, nil)
+	clientShutdownGracePeriod := 150 * time.Millisecond
+	pool.release(key, clientShutdownGracePeriod, nil)
 	assert.True(t, pool.hasLingerTimer(key))
 
 	// Sleep 30ms (well within grace period), then re-acquire
@@ -146,7 +146,7 @@ func TestClientPool_ReacquireDuringGracePeriod(t *testing.T) {
 	assert.False(t, pool.hasLingerTimer(key))
 
 	// Sleep longer than original grace period; client must still be alive!
-	time.Sleep(gracePeriod + 50*time.Millisecond)
+	time.Sleep(clientShutdownGracePeriod + 50*time.Millisecond)
 	assert.NoError(t, c1.Ping(context.Background()).Err())
 	assert.Equal(t, 1, pool.len())
 
@@ -293,7 +293,7 @@ func TestRedisStorage_DelayedShutdown_BackgroundOperation(t *testing.T) {
 	rs.logger = logger.Sugar()
 	rs.Address = []string{mr.Addr()}
 	rs.DB = DBIndex("0")
-	rs.GracePeriod = "100ms"
+	rs.ClientShutdownGracePeriod = "100ms"
 	err = rs.finalizeConfiguration(ctx)
 	require.NoError(t, err)
 
@@ -333,7 +333,7 @@ func TestRedisStorage_UnlockAfterCleanup(t *testing.T) {
 	rs.logger = logger.Sugar()
 	rs.Address = []string{mr.Addr()}
 	rs.DB = DBIndex("0")
-	rs.GracePeriod = "200ms"
+	rs.ClientShutdownGracePeriod = "200ms"
 	err = rs.finalizeConfiguration(ctx)
 	require.NoError(t, err)
 
@@ -356,71 +356,71 @@ func TestRedisStorage_UnlockAfterCleanup(t *testing.T) {
 	_ = rs.Unlock(ctx, lockKey)
 }
 
-func TestRedisStorage_GracePeriodConfiguration(t *testing.T) {
+func TestRedisStorage_ClientShutdownGracePeriodConfiguration(t *testing.T) {
 	mr, err := miniredis.Run()
 	require.NoError(t, err)
 	defer mr.Close()
 	defer defaultPool.reset()
 
-	t.Run("default grace_period is 30s", func(t *testing.T) {
+	t.Run("default client_shutdown_grace_period is 10s", func(t *testing.T) {
 		rs := New()
 		rs.Address = []string{mr.Addr()}
 		err := rs.finalizeConfiguration(context.Background())
 		require.NoError(t, err)
-		assert.Equal(t, 30*time.Second, rs.gracePeriodDuration)
+		assert.Equal(t, 10*time.Second, rs.clientShutdownGracePeriodDuration)
 		_ = rs.Cleanup()
 	})
 
 	t.Run("custom duration string parsed", func(t *testing.T) {
 		rs := New()
 		rs.Address = []string{mr.Addr()}
-		rs.GracePeriod = "15s"
+		rs.ClientShutdownGracePeriod = "15s"
 		err := rs.finalizeConfiguration(context.Background())
 		require.NoError(t, err)
-		assert.Equal(t, 15*time.Second, rs.gracePeriodDuration)
+		assert.Equal(t, 15*time.Second, rs.clientShutdownGracePeriodDuration)
 		_ = rs.Cleanup()
 	})
 
 	t.Run("custom integer seconds parsed", func(t *testing.T) {
 		rs := New()
 		rs.Address = []string{mr.Addr()}
-		rs.GracePeriod = "10"
+		rs.ClientShutdownGracePeriod = "10"
 		err := rs.finalizeConfiguration(context.Background())
 		require.NoError(t, err)
-		assert.Equal(t, 10*time.Second, rs.gracePeriodDuration)
+		assert.Equal(t, 10*time.Second, rs.clientShutdownGracePeriodDuration)
 		_ = rs.Cleanup()
 	})
 
-	t.Run("zero grace_period parsed", func(t *testing.T) {
+	t.Run("zero client_shutdown_grace_period parsed", func(t *testing.T) {
 		rs := New()
 		rs.Address = []string{mr.Addr()}
-		rs.GracePeriod = "0s"
+		rs.ClientShutdownGracePeriod = "0s"
 		err := rs.finalizeConfiguration(context.Background())
 		require.NoError(t, err)
-		assert.Equal(t, time.Duration(0), rs.gracePeriodDuration)
+		assert.Equal(t, time.Duration(0), rs.clientShutdownGracePeriodDuration)
 		_ = rs.Cleanup()
 	})
 
-	t.Run("invalid grace_period rejected", func(t *testing.T) {
+	t.Run("invalid client_shutdown_grace_period rejected", func(t *testing.T) {
 		rs := New()
 		rs.Address = []string{mr.Addr()}
-		rs.GracePeriod = "invalid-duration"
+		rs.ClientShutdownGracePeriod = "invalid-duration"
 		err := rs.finalizeConfiguration(context.Background())
 		require.Error(t, err)
-		assert.Contains(t, err.Error(), "invalid grace_period value")
+		assert.Contains(t, err.Error(), "invalid client_shutdown_grace_period value")
 	})
 
-	t.Run("caddyfile unmarshals grace_period", func(t *testing.T) {
+	t.Run("caddyfile unmarshals client_shutdown_grace_period", func(t *testing.T) {
 		d := caddyfile.NewTestDispenser(`
 			redis {
 				address 127.0.0.1:6379
-				grace_period 45s
+				client_shutdown_grace_period 45s
 			}
 		`)
 		rs := New()
 		err := rs.UnmarshalCaddyfile(d)
 		require.NoError(t, err)
-		assert.Equal(t, "45s", rs.GracePeriod)
+		assert.Equal(t, "45s", rs.ClientShutdownGracePeriod)
 	})
 }
 

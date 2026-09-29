@@ -27,15 +27,17 @@ import (
 )
 
 const (
-	defaultGracePeriodStr = "30s"
-	defaultGracePeriod    = 30 * time.Second
+	defaultClientShutdownGracePeriodStr = "10s"
+	defaultClientShutdownGracePeriod    = 10 * time.Second
 )
 
 type pooledClientEntry struct {
-	client      redis.UniversalClient
-	locker      *redislock.Client
-	refCount    int
-	lingerTimer *time.Timer
+	client          redis.UniversalClient
+	locker          *redislock.Client
+	refCount        int
+	lingerTimer     *time.Timer
+	closeAfter      time.Time
+	timerGeneration uint64
 }
 
 // poolIdentity is the connection identity used to key the client pool - two
@@ -57,6 +59,7 @@ type poolIdentity struct {
 	TlsInsecure        bool
 	TlsServerCertsPEM  string
 	TlsServerCertsPath string
+	TlsTrustPEM        string
 	RouteByLatency     bool
 	RouteRandomly      bool
 }
@@ -114,6 +117,7 @@ func (p *redisClientPool) acquire(
 	defer p.mu.Unlock()
 
 	if entry, exists := p.entries[key]; exists {
+		entry.timerGeneration++ // Invalidate callbacks that have already started.
 		if entry.lingerTimer != nil {
 			if entry.lingerTimer.Stop() {
 				logger.Debugf("Cancelled delayed shutdown for pooled Redis client (%s)", key)
@@ -141,7 +145,7 @@ func (p *redisClientPool) acquire(
 
 func (p *redisClientPool) release(
 	key poolIdentity,
-	gracePeriod time.Duration,
+	clientShutdownGracePeriod time.Duration,
 	logger *zap.SugaredLogger,
 ) {
 	if logger == nil {
@@ -149,27 +153,35 @@ func (p *redisClientPool) release(
 	}
 
 	p.mu.Lock()
-	defer p.mu.Unlock()
-
 	entry, exists := p.entries[key]
 	if !exists {
+		p.mu.Unlock()
 		return
 	}
 
+	// Preserve each released owner's deadline, even while other owners remain.
+	deadline := time.Now().Add(max(clientShutdownGracePeriod, 0))
+	if deadline.After(entry.closeAfter) {
+		entry.closeAfter = deadline
+	}
 	entry.refCount--
 	logger.Debugf("Released pooled Redis client (%s), refCount: %d", key, entry.refCount)
 
 	if entry.refCount > 0 {
+		p.mu.Unlock()
 		return
 	}
 
-	// refCount reached 0
-	if gracePeriod <= 0 {
+	entry.timerGeneration++
+	generation := entry.timerGeneration
+	if entry.lingerTimer != nil {
+		entry.lingerTimer.Stop()
+		entry.lingerTimer = nil
+	}
+	delay := time.Until(entry.closeAfter)
+	if delay <= 0 {
 		delete(p.entries, key)
-		if entry.lingerTimer != nil {
-			entry.lingerTimer.Stop()
-			entry.lingerTimer = nil
-		}
+		p.mu.Unlock()
 		if err := entry.client.Close(); err != nil {
 			logger.Warnf("Error closing Redis client (%s): %v", key, err)
 		}
@@ -177,25 +189,27 @@ func (p *redisClientPool) release(
 		return
 	}
 
-	if entry.lingerTimer != nil {
-		entry.lingerTimer.Stop()
-	}
+	logger.Debugf("Scheduled delayed shutdown for Redis client (%s) in %v", key, delay)
 
-	logger.Debugf("Scheduled delayed shutdown for Redis client (%s) in %v", key, gracePeriod)
-
-	entry.lingerTimer = time.AfterFunc(gracePeriod, func() {
-		p.mu.Lock()
-		currEntry, stillExists := p.entries[key]
-		if !stillExists || currEntry != entry || entry.refCount > 0 {
-			p.mu.Unlock()
-			return
-		}
-		delete(p.entries, key)
-		p.mu.Unlock()
-
-		if err := entry.client.Close(); err != nil {
-			logger.Warnf("Error closing Redis client after grace period (%s): %v", key, err)
-		}
-		logger.Infof("Closed Redis client after grace period (%s)", key)
+	entry.lingerTimer = time.AfterFunc(delay, func() {
+		p.closeIdleClient(key, entry, generation, logger)
 	})
+	p.mu.Unlock()
+}
+
+func (p *redisClientPool) closeIdleClient(key poolIdentity, entry *pooledClientEntry, generation uint64, logger *zap.SugaredLogger) {
+	p.mu.Lock()
+	current, exists := p.entries[key]
+	if !exists || current != entry || entry.refCount != 0 || entry.timerGeneration != generation {
+		p.mu.Unlock()
+		return
+	}
+	delete(p.entries, key)
+	entry.lingerTimer = nil
+	p.mu.Unlock()
+
+	if err := entry.client.Close(); err != nil {
+		logger.Warnf("Error closing Redis client after grace period (%s): %v", key, err)
+	}
+	logger.Infof("Closed Redis client after grace period (%s)", key)
 }

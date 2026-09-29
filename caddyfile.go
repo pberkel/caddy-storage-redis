@@ -178,8 +178,8 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.Errf("invalid boolean value for 'route_randomly': %s", configVal[0])
 				}
 				rs.RouteRandomly = routeRandomly
-			case "grace_period":
-				rs.GracePeriod = configVal[0]
+			case "client_shutdown_grace_period":
+				rs.ClientShutdownGracePeriod = configVal[0]
 			default:
 				return d.Errf("unknown configuration key: %s", configKey)
 			}
@@ -280,19 +280,19 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 		return fmt.Errorf("invalid db value: %s", rs.DB)
 	}
 
-	rs.GracePeriod = repl.ReplaceAll(rs.GracePeriod, defaultGracePeriodStr)
-	if rs.GracePeriod != "" {
-		d, err := caddy.ParseDuration(rs.GracePeriod)
+	rs.ClientShutdownGracePeriod = repl.ReplaceAll(rs.ClientShutdownGracePeriod, defaultClientShutdownGracePeriodStr)
+	if rs.ClientShutdownGracePeriod != "" {
+		d, err := caddy.ParseDuration(rs.ClientShutdownGracePeriod)
 		if err != nil {
-			if secs, errSec := strconv.Atoi(rs.GracePeriod); errSec == nil && secs >= 0 {
+			if secs, errSec := strconv.Atoi(rs.ClientShutdownGracePeriod); errSec == nil && secs >= 0 {
 				d = time.Duration(secs) * time.Second
 			} else {
-				return fmt.Errorf("invalid grace_period value: %s", rs.GracePeriod)
+				return fmt.Errorf("invalid client_shutdown_grace_period value: %s", rs.ClientShutdownGracePeriod)
 			}
 		}
-		rs.gracePeriodDuration = d
+		rs.clientShutdownGracePeriodDuration = d
 	} else {
-		rs.gracePeriodDuration = defaultGracePeriod
+		rs.clientShutdownGracePeriodDuration = defaultClientShutdownGracePeriod
 	}
 
 	// TODO: these are non-string fields so they can't easily be substituted at runtime :(
@@ -350,7 +350,7 @@ func (rs *RedisStorage) Cleanup() error {
 	}
 	rs.cleanupOnce.Do(func() {
 		if rs.poolKeyVal != (poolIdentity{}) {
-			defaultPool.release(rs.poolKeyVal, rs.gracePeriodDuration, rs.logger)
+			defaultPool.release(rs.poolKeyVal, rs.clientShutdownGracePeriodDuration, rs.logger)
 		} else if rs.client != nil {
 			rs.client.Close()
 		}

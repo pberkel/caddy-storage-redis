@@ -56,7 +56,7 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
         compression    false   // compression algorithm: 'flate' (raw DEFLATE), 'zlib', or 'false' (no compression, the default). Legacy boolean 'true' maps to 'flate'
         tls_enabled    false
         tls_insecure   false
-        grace_period   "30s"   // delay closing client on reload/shutdown to allow background CertMagic routines to drain (default "30s")
+        client_shutdown_grace_period "10s" // keep the client available for background work after cleanup (default "10s")
     }
 }
 
@@ -65,6 +65,8 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
 }
 ```
 Note that `host` and `port` values can be configured (or accept the defaults) OR an `address` value can be specified, which will override the `host` and `port` values.
+
+`client_shutdown_grace_period` defaults to `10s`. Clients remain open while any storage instance uses them and until every released instance's grace period has elapsed. Set it to `0s` to add no delay for that instance, or increase it when background operations need more time. Instances with the same connection settings share a client across reloads.
 
 Here's the same config as above, but in JSON format (which Caddy parses all configs into under the hood):
 ```json
@@ -77,7 +79,7 @@ Here's the same config as above, but in JSON format (which Caddy parses all conf
         "compression": false,
         "db": 0,
         "encryption_key": "",
-        "grace_period": "30s",
+        "client_shutdown_grace_period": "10s",
         "host": [
             "127.0.0.1"
         ],
