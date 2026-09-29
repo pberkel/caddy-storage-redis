@@ -22,6 +22,8 @@ import (
 	"reflect"
 	"strconv"
 	"strings"
+	"sync"
+	"time"
 
 	"github.com/spf13/cobra"
 
@@ -176,6 +178,8 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 					return d.Errf("invalid boolean value for 'route_randomly': %s", configVal[0])
 				}
 				rs.RouteRandomly = routeRandomly
+			case "grace_period":
+				rs.GracePeriod = configVal[0]
 			default:
 				return d.Errf("unknown configuration key: %s", configKey)
 			}
@@ -276,6 +280,21 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 		return fmt.Errorf("invalid db value: %s", rs.DB)
 	}
 
+	rs.GracePeriod = repl.ReplaceAll(rs.GracePeriod, defaultGracePeriodStr)
+	if rs.GracePeriod != "" {
+		d, err := caddy.ParseDuration(rs.GracePeriod)
+		if err != nil {
+			if secs, errSec := strconv.Atoi(rs.GracePeriod); errSec == nil && secs >= 0 {
+				d = time.Duration(secs) * time.Second
+			} else {
+				return fmt.Errorf("invalid grace_period value: %s", rs.GracePeriod)
+			}
+		}
+		rs.gracePeriodDuration = d
+	} else {
+		rs.gracePeriodDuration = defaultGracePeriod
+	}
+
 	// TODO: these are non-string fields so they can't easily be substituted at runtime :(
 	// rs.TlsEnabled
 	// rs.TlsInsecure
@@ -326,11 +345,16 @@ func normalizeKeyPrefix(prefix string) (string, error) {
 }
 
 func (rs *RedisStorage) Cleanup() error {
-	// Close the Redis connection
-	if rs.client != nil {
-		rs.client.Close()
+	if rs.cleanupOnce == nil {
+		rs.cleanupOnce = new(sync.Once)
 	}
-
+	rs.cleanupOnce.Do(func() {
+		if rs.poolKeyVal != (poolIdentity{}) {
+			defaultPool.release(rs.poolKeyVal, rs.gracePeriodDuration, rs.logger)
+		} else if rs.client != nil {
+			rs.client.Close()
+		}
+	})
 	return nil
 }
 

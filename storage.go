@@ -129,11 +129,18 @@ type RedisStorage struct {
 	RouteByLatency bool `json:"route_by_latency"`
 	// RouteRandomly Route commands randomly, only used in Cluster mode. Default: false
 	RouteRandomly bool `json:"route_randomly"`
+	// GracePeriod specifies the duration to keep the Redis connection pool alive after
+	// this storage instance is cleaned up, allowing background routines (e.g. CertMagic)
+	// to complete without connection errors. Default: "30s".
+	GracePeriod string `json:"grace_period,omitempty"`
 
-	client redis.UniversalClient
-	locker *redislock.Client
-	logger *zap.SugaredLogger
-	locks  *sync.Map
+	client              redis.UniversalClient
+	locker              *redislock.Client
+	logger              *zap.SugaredLogger
+	locks               *sync.Map
+	poolKeyVal          poolIdentity
+	gracePeriodDuration time.Duration
+	cleanupOnce         *sync.Once
 }
 
 // CompressionMode specifies the compression algorithm used when storing values.
@@ -225,12 +232,14 @@ func New() *RedisStorage {
 		Compression: CompressionNone,
 		TlsEnabled:  defaultTLS,
 		TlsInsecure: defaultTLSInsecure,
+		GracePeriod: defaultGracePeriodStr,
+		cleanupOnce: new(sync.Once),
 	}
 	return &rs
 }
 
-// Initialize Redis client and locker
-func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
+// createRedisClient creates and validates a new Redis client instance based on configuration
+func (rs *RedisStorage) createRedisClient(ctx context.Context) (redis.UniversalClient, error) {
 
 	// DB was validated in finalizeConfiguration; parse is safe here
 	dbInt, _ := strconv.Atoi(string(rs.DB))
@@ -266,7 +275,7 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 		}
 
 		if len(rs.TlsServerCertsPEM) > 0 && len(rs.TlsServerCertsPath) > 0 {
-			return fmt.Errorf("Cannot specify TlsServerCertsPEM alongside TlsServerCertsPath")
+			return nil, fmt.Errorf("Cannot specify TlsServerCertsPEM alongside TlsServerCertsPath")
 		}
 
 		if len(rs.TlsServerCertsPEM) > 0 || len(rs.TlsServerCertsPath) > 0 {
@@ -277,12 +286,12 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 				var err error
 				pem, err = os.ReadFile(rs.TlsServerCertsPath)
 				if err != nil {
-					return fmt.Errorf("Failed to load PEM server certs from file %s: %w", rs.TlsServerCertsPath, err)
+					return nil, fmt.Errorf("Failed to load PEM server certs from file %s: %w", rs.TlsServerCertsPath, err)
 				}
 			}
 
 			if !certPool.AppendCertsFromPEM(pem) {
-				return fmt.Errorf("Failed to load PEM server certs")
+				return nil, fmt.Errorf("Failed to load PEM server certs")
 			}
 
 			clientOpts.TLSConfig.RootCAs = certPool
@@ -291,9 +300,10 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 
 	// Create appropriate Redis client type
 	if rs.ClientType == "failover" && clientOpts.MasterName == "" {
-		return fmt.Errorf("'master_name' is required when using 'failover' client type")
+		return nil, fmt.Errorf("'master_name' is required when using 'failover' client type")
 	}
 
+	var client redis.UniversalClient
 	if rs.ClientType == "failover" {
 
 		if rs.SentinelPassword != "" {
@@ -308,9 +318,9 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 			return shard.Ping(ctx).Err()
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		rs.client = clusterClient
+		client = clusterClient
 
 	} else if rs.ClientType == "cluster" || len(clientOpts.Addrs) > 1 {
 
@@ -322,25 +332,49 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 			return shard.Ping(ctx).Err()
 		})
 		if err != nil {
-			return err
+			return nil, err
 		}
-		rs.client = clusterClient
+		client = clusterClient
 
 	} else {
 
 		// Create new Redis simple standalone client
-		rs.client = redis.NewClient(clientOpts.Simple())
+		c := redis.NewClient(clientOpts.Simple())
 
 		// Test connection to the Redis server
-		err := rs.client.Ping(ctx).Err()
+		err := c.Ping(ctx).Err()
 		if err != nil {
-			return err
+			return nil, err
 		}
+		client = c
 	}
 
-	// Create new redislock client
-	rs.locker = redislock.New(rs.client)
+	return client, nil
+}
+
+// Initialize Redis client and locker using reference-counted pool
+func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
+	key := rs.poolKey()
 	rs.locks = &sync.Map{}
+	if rs.cleanupOnce == nil {
+		rs.cleanupOnce = new(sync.Once)
+	}
+
+	client, locker, err := defaultPool.acquire(key, rs.logger, func() (redis.UniversalClient, *redislock.Client, error) {
+		c, err := rs.createRedisClient(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		l := redislock.New(c)
+		return c, l, nil
+	})
+	if err != nil {
+		return err
+	}
+
+	rs.client = client
+	rs.locker = locker
+	rs.poolKeyVal = key
 	return nil
 }
 

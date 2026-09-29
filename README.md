@@ -56,6 +56,7 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
         compression    false   // compression algorithm: 'flate' (raw DEFLATE), 'zlib', or 'false' (no compression, the default). Legacy boolean 'true' maps to 'flate'
         tls_enabled    false
         tls_insecure   false
+        grace_period   "30s"   // delay closing client on reload/shutdown to allow background CertMagic routines to drain (default "30s")
     }
 }
 
@@ -76,6 +77,7 @@ Here's the same config as above, but in JSON format (which Caddy parses all conf
         "compression": false,
         "db": 0,
         "encryption_key": "",
+        "grace_period": "30s",
         "host": [
             "127.0.0.1"
         ],
