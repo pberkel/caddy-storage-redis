@@ -56,6 +56,7 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
         compression    false   // compression algorithm: 'flate' (raw DEFLATE), 'zlib', or 'false' (no compression, the default). Legacy boolean 'true' maps to 'flate'
         tls_enabled    false
         tls_insecure   false
+        client_name    ""      // connection name shown in CLIENT LIST; default unnamed
     }
 }
 
@@ -72,6 +73,7 @@ Here's the same config as above, but in JSON format (which Caddy parses all conf
         "address": [
             "127.0.0.1:6379"
         ],
+        "client_name": "",
         "client_type": "simple",
         "compression": false,
         "db": 0,

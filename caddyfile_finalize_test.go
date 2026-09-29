@@ -299,3 +299,20 @@ func TestFinalizeConfiguration_AddressHostPortValidation(t *testing.T) {
 		assert.Empty(t, rs.Port)
 	})
 }
+
+func TestFinalizeConfiguration_ClientName(t *testing.T) {
+	t.Setenv("REDIS_CLIENT_NAME", "caddy-test")
+
+	rs, mr := newFinalizeTestStorage(t)
+	rs.Address = []string{mr.Addr()}
+	rs.ClientName = "{env.REDIS_CLIENT_NAME}"
+
+	err := rs.finalizeConfiguration(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rs.Cleanup() })
+
+	assert.Equal(t, "caddy-test", rs.ClientName)
+	name, err := rs.client.ClientGetName(context.Background()).Result()
+	require.NoError(t, err)
+	assert.Equal(t, "caddy-test", name)
+}

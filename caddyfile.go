@@ -120,6 +120,8 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if configVal[0] != "" {
 					rs.MasterName = configVal[0]
 				}
+			case "client_name":
+				rs.ClientName = configVal[0]
 			case "key_prefix":
 				if configVal[0] != "" {
 					rs.KeyPrefix = configVal[0]
@@ -237,6 +239,7 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 	rs.Username = repl.ReplaceAll(rs.Username, "")
 	rs.Password = repl.ReplaceAll(rs.Password, "")
 	rs.SentinelPassword = repl.ReplaceAll(rs.SentinelPassword, "")
+	rs.ClientName = repl.ReplaceAll(rs.ClientName, "")
 	rs.KeyPrefix = repl.ReplaceAll(rs.KeyPrefix, defaultKeyPrefix)
 	keyPrefix, err := normalizeKeyPrefix(rs.KeyPrefix)
 	if err != nil {
