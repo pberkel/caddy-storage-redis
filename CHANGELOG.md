@@ -1,3 +1,23 @@
+# Unreleased
+
+### New features
+
+- **Redis clients are shared across storage instances and configuration reloads.** Clients with matching connection settings use a reference-counted pool. The new `client_shutdown_grace_period` setting (`ClientShutdownGracePeriod` in Go) keeps clients available for background operations after storage cleanup and defaults to `10s`. Set it to `0s` to add no delay for that instance; negative values are rejected.
+- **External consumers can retain clients with `AcquireClient()`.** The method returns the existing client and an idempotent release function, allowing consumers to keep using the client beyond storage cleanup. Acquisition from unprovisioned or cleaned-up storage returns `ErrClientUnavailable`. `GetClient()` remains available without retaining a reference; callers must not close shared clients directly.
+
+### Improvements
+
+- **Shutdown honors every storage instance's grace period and outstanding consumer references.** Repeated cleanup or release calls do not release additional references, and stale timer callbacks cannot close a client after it has been reacquired and given a new shutdown deadline.
+- **TLS trust-file changes are respected when selecting pooled clients.** Trust files are read and validated during provisioning, and their contents participate in the pool identity so replacing a file at the same path takes effect on reload.
+
+### Bug fixes
+
+- **Clients are closed when initial connection validation fails.** Failed `PING` or shard validation no longer leaves newly created clients open.
+
+### API changes
+
+- **`Cleanup()` now returns immediate client-close errors instead of always returning `nil`.** The release function returned by `AcquireClient()` also returns immediate close errors. Errors from delayed shutdown are logged. Repeated calls return the same result without attempting another release.
+
 # v1.8.2 (2026-08-28)
 
 ### Bug fixes
