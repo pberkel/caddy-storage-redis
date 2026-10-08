@@ -57,6 +57,8 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
         tls_enabled    false
         tls_insecure   false
         client_name    ""      // connection name shown in CLIENT LIST; default unnamed
+        skip_connection_check false // skip the PING sent at startup; connection errors then surface on first use
+        client_shutdown_grace_period "10s" // keep the client available for background work after cleanup (default "10s")
     }
 }
 
@@ -65,6 +67,10 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
 }
 ```
 Note that `host` and `port` values can be configured (or accept the defaults) OR an `address` value can be specified, which will override the `host` and `port` values.
+
+`client_shutdown_grace_period` defaults to `10s`. Clients remain open while any storage instance uses them and until every released instance's grace period has elapsed. Set it to `0s` to add no delay for that instance, or increase it when background operations need more time. Instances with the same connection settings, including `client_name`, share a client across reloads. Different client names use separate clients.
+
+`skip_connection_check` defaults to `false`: the module sends a `PING` while Caddy provisions it, so an unreachable server fails `caddy run`, `caddy reload` and `caddy validate`. Set it to `true` to defer that check. The configuration is still validated, but a connection problem surfaces on the first storage operation instead. Other modules may still use the storage during provisioning (Caddy's internal CA, for example), so this does not guarantee a fully offline validation.
 
 Here's the same config as above, but in JSON format (which Caddy parses all configs into under the hood):
 ```json
@@ -78,6 +84,7 @@ Here's the same config as above, but in JSON format (which Caddy parses all conf
         "compression": false,
         "db": 0,
         "encryption_key": "",
+        "client_shutdown_grace_period": "10s",
         "host": [
             "127.0.0.1"
         ],
@@ -90,6 +97,7 @@ Here's the same config as above, but in JSON format (which Caddy parses all conf
         ],
         "route_by_latency": false,
         "route_randomly": false,
+        "skip_connection_check": false,
         "timeout": "5",
         "tls_enabled": false,
         "tls_insecure": false,
@@ -130,6 +138,7 @@ NOTE however the following configuration options do not (yet) support runtime su
 - tls_insecure
 - route_by_latency
 - route_randomly
+- skip_connection_check
 
 ### Cluster mode
 
@@ -243,6 +252,31 @@ You can also use the `tls_server_certs_pem` option to provide one or more PEM en
 }
 ```
 If you prefer not to put certificates in your Caddyfile, you can also put the series of PEM certificates into a file and use `tls_server_certs_path` to point Caddy at it.
+
+## Sharing the Redis client with other modules
+
+After provisioning, `AcquireClient()` returns the existing client and an idempotent release function. Use it when a consumer, such as a pooled transport, can outlive the storage configuration. A Caddy module can assert the API on the `certmagic.Storage` returned by `ctx.Storage()`:
+
+```go
+storage, ok := ctx.Storage().(interface {
+    AcquireClient() (any, func() error, error)
+})
+if !ok {
+    return fmt.Errorf("configured storage does not support retaining Redis clients")
+}
+value, release, err := storage.AcquireClient()
+if err != nil {
+    return err
+}
+client := value.(redis.UniversalClient)
+// Keep client and release until the consumer has finished all Redis operations.
+```
+
+Call `release()` when the consumer closes, and handle its returned error. Never call `client.Close()` directly. Each acquisition holds a reference in the shared pool, keeping the client alive even after storage cleanup and beyond `client_shutdown_grace_period`. Acquisition after cleanup returns `ErrClientUnavailable`; existing acquisitions remain valid until released.
+
+Storage cleanup starts that instance's shutdown grace period. A consumer's release does not add another grace period. The client closes only when all storage and consumer references have been released and all storage shutdown deadlines have elapsed. Immediate close errors are returned by `release()` or `Cleanup()`; delayed close errors are logged. Repeated calls return the same result without releasing another reference.
+
+A retained client keeps its original connection settings. After credentials, TLS trust, or other connection settings change, acquire from the newly provisioned storage instance to use them. `GetClient()` remains available without retaining a reference; callers using it must finish before storage cleanup.
 
 ## Maintenance
 

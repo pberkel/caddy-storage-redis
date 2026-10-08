@@ -1,3 +1,25 @@
+# Unreleased
+
+### New features
+
+- **`client_name` names Redis connections.** Sets the name shown in `CLIENT LIST` for standalone, cluster, and failover clients, including connections used by consumers of the shared client. Supports Caddy placeholders and defaults to unnamed. Different names use separate pooled clients.
+- **Redis clients are shared across storage instances and configuration reloads.** Clients with matching connection settings use a reference-counted pool. The new `client_shutdown_grace_period` setting (`ClientShutdownGracePeriod` in Go) keeps clients available for background operations after storage cleanup and defaults to `10s`. Set it to `0s` to add no delay for that instance; negative values are rejected.
+- **External consumers can retain clients with `AcquireClient()`.** The method returns the existing client and an idempotent release function, allowing consumers to keep using the client beyond storage cleanup. Acquisition from unprovisioned or cleaned-up storage returns `ErrClientUnavailable`. `GetClient()` remains available without retaining a reference; callers must not close shared clients directly.
+- **`skip_connection_check` defers the initial Redis connection check.** The module sends a `PING` during provisioning, so `caddy validate` and a start or reload fail while the server is unreachable. With `skip_connection_check true` (`SkipConnectionCheck` in Go) the configuration is still validated but the probe is skipped, and connection errors surface on first use. A pooled client created without the check is probed before it is shared with an instance that requires it. Defaults to `false`.
+
+### Improvements
+
+- **Shutdown honors every storage instance's grace period and outstanding consumer references.** Repeated cleanup or release calls do not release additional references, and stale timer callbacks cannot close a client after it has been reacquired and given a new shutdown deadline.
+- **TLS trust-file changes are respected when selecting pooled clients.** Trust files are read and validated during provisioning, and their contents participate in the pool identity so replacing a file at the same path takes effect on reload.
+
+### Bug fixes
+
+- **Clients are closed when initial connection validation fails.** Failed `PING` or shard validation no longer leaves newly created clients open.
+
+### API changes
+
+- **`Cleanup()` now returns immediate client-close errors instead of always returning `nil`.** The release function returned by `AcquireClient()` also returns immediate close errors. Errors from delayed shutdown are logged. Repeated calls return the same result without attempting another release.
+
 # v1.8.2 (2026-08-28)
 
 ### Bug fixes
