@@ -299,3 +299,44 @@ func TestFinalizeConfiguration_AddressHostPortValidation(t *testing.T) {
 		assert.Empty(t, rs.Port)
 	})
 }
+
+func TestFinalizeConfiguration_SkipConnectionCheck(t *testing.T) {
+	t.Parallel()
+
+	// A port that was listening a moment ago and is closed now: nothing answers on it.
+	unreachableAddr := func(t *testing.T) string {
+		t.Helper()
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		addr := l.Addr().String()
+		require.NoError(t, l.Close())
+		return addr
+	}
+	newStorage := func(addr string) *RedisStorage {
+		rs := New()
+		logger, _ := zap.NewProduction()
+		rs.logger = logger.Sugar()
+		rs.Address = []string{addr}
+		rs.Timeout = "1"
+		return rs
+	}
+
+	t.Run("unreachable server rejected by default", func(t *testing.T) {
+		rs := newStorage(unreachableAddr(t))
+
+		err := rs.finalizeConfiguration(context.Background())
+		require.Error(t, err)
+	})
+
+	t.Run("unreachable server accepted when skipped, failing on first use", func(t *testing.T) {
+		rs := newStorage(unreachableAddr(t))
+		rs.SkipConnectionCheck = true
+
+		err := rs.finalizeConfiguration(context.Background())
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = rs.Cleanup() })
+
+		err = rs.Store(context.Background(), "certificates/example.com/example.com.crt", []byte("value"))
+		require.Error(t, err)
+	})
+}

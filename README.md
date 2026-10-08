@@ -56,6 +56,7 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
         compression    false   // compression algorithm: 'flate' (raw DEFLATE), 'zlib', or 'false' (no compression, the default). Legacy boolean 'true' maps to 'flate'
         tls_enabled    false
         tls_insecure   false
+        skip_connection_check false // skip the PING sent at startup; connection errors then surface on first use
         client_shutdown_grace_period "10s" // keep the client available for background work after cleanup (default "10s")
     }
 }
@@ -67,6 +68,8 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
 Note that `host` and `port` values can be configured (or accept the defaults) OR an `address` value can be specified, which will override the `host` and `port` values.
 
 `client_shutdown_grace_period` defaults to `10s`. Clients remain open while any storage instance uses them and until every released instance's grace period has elapsed. Set it to `0s` to add no delay for that instance, or increase it when background operations need more time. Instances with the same connection settings share a client across reloads.
+
+`skip_connection_check` defaults to `false`: the module sends a `PING` while Caddy provisions it, so an unreachable server fails `caddy run`, `caddy reload` and `caddy validate`. Set it to `true` to defer that check. The configuration is still validated, but a connection problem surfaces on the first storage operation instead. Other modules may still use the storage during provisioning (Caddy's internal CA, for example), so this does not guarantee a fully offline validation.
 
 Here's the same config as above, but in JSON format (which Caddy parses all configs into under the hood):
 ```json
@@ -92,6 +95,7 @@ Here's the same config as above, but in JSON format (which Caddy parses all conf
         ],
         "route_by_latency": false,
         "route_randomly": false,
+        "skip_connection_check": false,
         "timeout": "5",
         "tls_enabled": false,
         "tls_insecure": false,
@@ -132,6 +136,7 @@ NOTE however the following configuration options do not (yet) support runtime su
 - tls_insecure
 - route_by_latency
 - route_randomly
+- skip_connection_check
 
 ### Cluster mode
 

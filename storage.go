@@ -132,6 +132,11 @@ type RedisStorage struct {
 	// ClientShutdownGracePeriod keeps the Redis client available after this instance
 	// is cleaned up so background operations can finish. Default: "10s".
 	ClientShutdownGracePeriod string `json:"client_shutdown_grace_period,omitempty"`
+	// SkipConnectionCheck skips the PING sent to the Redis server while the module is
+	// provisioned, so Caddy can start, reload and validate its configuration without a
+	// reachable server; a connection failure then surfaces on the first storage operation
+	// instead. Default: false
+	SkipConnectionCheck bool `json:"skip_connection_check"`
 
 	client                            redis.UniversalClient
 	locker                            *redislock.Client
@@ -311,12 +316,14 @@ func (rs *RedisStorage) createRedisClient(ctx context.Context, tlsConfig *tls.Co
 		clusterClient := redis.NewFailoverClusterClient(clientOpts.Failover())
 
 		// Test connection to the Redis cluster
-		err := clusterClient.ForEachShard(ctx, func(ctx context.Context, shard *redis.Client) error {
-			return shard.Ping(ctx).Err()
-		})
-		if err != nil {
-			_ = clusterClient.Close()
-			return nil, err
+		if !rs.SkipConnectionCheck {
+			err := clusterClient.ForEachShard(ctx, func(ctx context.Context, shard *redis.Client) error {
+				return shard.Ping(ctx).Err()
+			})
+			if err != nil {
+				_ = clusterClient.Close()
+				return nil, err
+			}
 		}
 		client = clusterClient
 
@@ -326,12 +333,14 @@ func (rs *RedisStorage) createRedisClient(ctx context.Context, tlsConfig *tls.Co
 		clusterClient := redis.NewClusterClient(clientOpts.Cluster())
 
 		// Test connection to the Redis cluster
-		err := clusterClient.ForEachShard(ctx, func(ctx context.Context, shard *redis.Client) error {
-			return shard.Ping(ctx).Err()
-		})
-		if err != nil {
-			_ = clusterClient.Close()
-			return nil, err
+		if !rs.SkipConnectionCheck {
+			err := clusterClient.ForEachShard(ctx, func(ctx context.Context, shard *redis.Client) error {
+				return shard.Ping(ctx).Err()
+			})
+			if err != nil {
+				_ = clusterClient.Close()
+				return nil, err
+			}
 		}
 		client = clusterClient
 
@@ -341,10 +350,12 @@ func (rs *RedisStorage) createRedisClient(ctx context.Context, tlsConfig *tls.Co
 		c := redis.NewClient(clientOpts.Simple())
 
 		// Test connection to the Redis server
-		err := c.Ping(ctx).Err()
-		if err != nil {
-			_ = c.Close()
-			return nil, err
+		if !rs.SkipConnectionCheck {
+			err := c.Ping(ctx).Err()
+			if err != nil {
+				_ = c.Close()
+				return nil, err
+			}
 		}
 		client = c
 	}

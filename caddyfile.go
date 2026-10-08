@@ -179,6 +179,12 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				rs.RouteRandomly = routeRandomly
 			case "client_shutdown_grace_period":
 				rs.ClientShutdownGracePeriod = configVal[0]
+			case "skip_connection_check":
+				skipConnectionCheck, err := strconv.ParseBool(configVal[0])
+				if err != nil {
+					return d.Errf("invalid boolean value for 'skip_connection_check': %s", configVal[0])
+				}
+				rs.SkipConnectionCheck = skipConnectionCheck
 			default:
 				return d.Errf("unknown configuration key: %s", configKey)
 			}
@@ -196,6 +202,9 @@ func (rs *RedisStorage) Provision(ctx caddy.Context) error {
 	err := rs.finalizeConfiguration(ctx)
 	if err == nil {
 		rs.logger.Infof("Provision Redis %s storage using address %v", rs.ClientType, rs.Address)
+		if rs.SkipConnectionCheck {
+			rs.logger.Info("Skipped the initial Redis connection check; connection errors will surface on first use")
+		}
 	}
 
 	return err
