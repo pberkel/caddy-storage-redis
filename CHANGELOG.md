@@ -4,6 +4,7 @@
 
 - **Redis clients are shared across storage instances and configuration reloads.** Clients with matching connection settings use a reference-counted pool. The new `client_shutdown_grace_period` setting (`ClientShutdownGracePeriod` in Go) keeps clients available for background operations after storage cleanup and defaults to `10s`. Set it to `0s` to add no delay for that instance; negative values are rejected.
 - **External consumers can retain clients with `AcquireClient()`.** The method returns the existing client and an idempotent release function, allowing consumers to keep using the client beyond storage cleanup. Acquisition from unprovisioned or cleaned-up storage returns `ErrClientUnavailable`. `GetClient()` remains available without retaining a reference; callers must not close shared clients directly.
+- **`skip_connection_check` defers the initial Redis connection check.** The module sends a `PING` during provisioning, so `caddy validate` and a start or reload fail while the server is unreachable. With `skip_connection_check true` (`SkipConnectionCheck` in Go) the configuration is still validated but the probe is skipped, and connection errors surface on first use. A pooled client created without the check is probed before it is shared with an instance that requires it. Defaults to `false`.
 
 ### Improvements
 

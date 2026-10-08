@@ -19,8 +19,10 @@ import (
 	"net"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/alicebob/miniredis/v2"
+	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -297,5 +299,91 @@ func TestFinalizeConfiguration_AddressHostPortValidation(t *testing.T) {
 		assert.Equal(t, []string{mr.Addr()}, rs.Address)
 		assert.Empty(t, rs.Host)
 		assert.Empty(t, rs.Port)
+	})
+}
+
+func TestFinalizeConfiguration_SkipConnectionCheck(t *testing.T) {
+	t.Parallel()
+
+	// A listener that drops every connection: the port stays reserved for the
+	// test, but no Redis command ever succeeds on it.
+	unreachableAddr := func(t *testing.T) string {
+		t.Helper()
+		l, err := net.Listen("tcp", "127.0.0.1:0")
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = l.Close() })
+		go func() {
+			for {
+				conn, err := l.Accept()
+				if err != nil {
+					return
+				}
+				_ = conn.Close()
+			}
+		}()
+		return l.Addr().String()
+	}
+	newStorage := func(addr string) *RedisStorage {
+		rs := New()
+		logger, _ := zap.NewProduction()
+		rs.logger = logger.Sugar()
+		rs.Address = []string{addr}
+		rs.Timeout = "1"
+		rs.ClientShutdownGracePeriod = "0s"
+		return rs
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	t.Cleanup(cancel)
+
+	t.Run("unreachable server rejected by default", func(t *testing.T) {
+		rs := newStorage(unreachableAddr(t))
+
+		err := rs.finalizeConfiguration(ctx)
+		require.Error(t, err)
+	})
+
+	t.Run("unreachable server accepted when skipped, failing on first use", func(t *testing.T) {
+		rs := newStorage(unreachableAddr(t))
+		rs.SkipConnectionCheck = true
+
+		err := rs.finalizeConfiguration(ctx)
+		require.NoError(t, err)
+		t.Cleanup(func() { _ = rs.Cleanup() })
+
+		err = rs.Store(ctx, "certificates/example.com/example.com.crt", []byte("value"))
+		require.Error(t, err)
+	})
+
+	t.Run("an unprobed pooled client is not reused by an instance that asked for the check", func(t *testing.T) {
+		addr := unreachableAddr(t)
+		skipped := newStorage(addr)
+		skipped.SkipConnectionCheck = true
+		require.NoError(t, skipped.finalizeConfiguration(ctx))
+		t.Cleanup(func() { _ = skipped.Cleanup() })
+
+		strict := newStorage(addr)
+		err := strict.finalizeConfiguration(ctx)
+		require.Error(t, err)
+	})
+
+	t.Run("caddyfile unmarshals skip_connection_check", func(t *testing.T) {
+		d := caddyfile.NewTestDispenser(`
+			redis {
+				address 127.0.0.1:6379
+				skip_connection_check true
+			}
+		`)
+		rs := New()
+		require.NoError(t, rs.UnmarshalCaddyfile(d))
+		assert.True(t, rs.SkipConnectionCheck)
+
+		d = caddyfile.NewTestDispenser(`
+			redis {
+				skip_connection_check maybe
+			}
+		`)
+		err := New().UnmarshalCaddyfile(d)
+		require.Error(t, err)
+		assert.Contains(t, err.Error(), "skip_connection_check")
 	})
 }

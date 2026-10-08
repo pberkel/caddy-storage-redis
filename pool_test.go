@@ -16,6 +16,7 @@ package storageredis
 
 import (
 	"context"
+	"errors"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -52,13 +53,13 @@ func TestClientPool_ReferenceCounting(t *testing.T) {
 	key := poolIdentity{ClientType: "simple", Addrs: "test-pool-key"}
 
 	// First acquire: factory is called, refCount becomes 1
-	c1, _, err := pool.acquire(key, nil, factory)
+	c1, _, err := pool.acquire(key, nil, factory, nil)
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&factoryCalls))
 	assert.Equal(t, 1, pool.getRefCount(key))
 
 	// Second acquire with same key: factory not called, refCount becomes 2
-	c2, _, err := pool.acquire(key, nil, factory)
+	c2, _, err := pool.acquire(key, nil, factory, nil)
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&factoryCalls))
 	assert.Equal(t, 2, pool.getRefCount(key))
@@ -90,7 +91,7 @@ func TestClientPool_DelayedShutdown(t *testing.T) {
 	}
 
 	key := poolIdentity{ClientType: "simple", Addrs: "test-linger-key"}
-	client, _, err := pool.acquire(key, nil, factory)
+	client, _, err := pool.acquire(key, nil, factory, nil)
 	require.NoError(t, err)
 
 	clientShutdownGracePeriod := 80 * time.Millisecond
@@ -125,7 +126,7 @@ func TestClientPool_ReacquireDuringClientShutdownGracePeriod(t *testing.T) {
 	}
 
 	key := poolIdentity{ClientType: "simple", Addrs: "test-reacquire-key"}
-	c1, _, err := pool.acquire(key, nil, factory)
+	c1, _, err := pool.acquire(key, nil, factory, nil)
 	require.NoError(t, err)
 	assert.Equal(t, int32(1), atomic.LoadInt32(&factoryCalls))
 
@@ -136,7 +137,7 @@ func TestClientPool_ReacquireDuringClientShutdownGracePeriod(t *testing.T) {
 
 	// Sleep 30ms (well within grace period), then re-acquire
 	time.Sleep(30 * time.Millisecond)
-	c2, _, err := pool.acquire(key, nil, factory)
+	c2, _, err := pool.acquire(key, nil, factory, nil)
 	require.NoError(t, err)
 
 	// Timer should be cancelled, factory NOT called again, same client returned
@@ -171,9 +172,9 @@ func TestClientPool_DistinctKeys(t *testing.T) {
 	key1 := poolIdentity{ClientType: "simple", Addrs: "test-distinct-key1"}
 	key2 := poolIdentity{ClientType: "simple", Addrs: "test-distinct-key2"}
 
-	c1, _, err := pool.acquire(key1, nil, factory)
+	c1, _, err := pool.acquire(key1, nil, factory, nil)
 	require.NoError(t, err)
-	c2, _, err := pool.acquire(key2, nil, factory)
+	c2, _, err := pool.acquire(key2, nil, factory, nil)
 	require.NoError(t, err)
 
 	assert.NotSame(t, c1, c2)
@@ -462,4 +463,46 @@ func (p *redisClientPool) reset() {
 		_ = entry.client.Close()
 		delete(p.entries, k)
 	}
+}
+
+func TestClientPool_ProbeUncheckedClientOnReuse(t *testing.T) {
+	mr, err := miniredis.Run()
+	require.NoError(t, err)
+	defer mr.Close()
+
+	pool := newRedisClientPool()
+	defer pool.reset()
+
+	factory := func() (redis.UniversalClient, *redislock.Client, error) {
+		c := redis.NewClient(&redis.Options{Addr: mr.Addr()})
+		return c, redislock.New(c), nil
+	}
+	var probeCalls int32
+	failing := errors.New("probe failed")
+	probeErr := failing
+	probe := func(c redis.UniversalClient) error {
+		atomic.AddInt32(&probeCalls, 1)
+		return probeErr
+	}
+	key := poolIdentity{ClientType: "simple", Addrs: "test-pool-key"}
+
+	// Created without a check
+	c1, _, err := pool.acquire(key, nil, factory, nil)
+	require.NoError(t, err)
+
+	// An owner that requires a check probes the shared client; failure leaves the entry untouched
+	_, _, err = pool.acquire(key, nil, factory, probe)
+	require.ErrorIs(t, err, failing)
+	assert.Equal(t, 1, pool.getRefCount(key))
+
+	// Once a probe succeeds the same client is shared and not probed again
+	probeErr = nil
+	c2, _, err := pool.acquire(key, nil, factory, probe)
+	require.NoError(t, err)
+	assert.Same(t, c1, c2)
+	c3, _, err := pool.acquire(key, nil, factory, probe)
+	require.NoError(t, err)
+	assert.Same(t, c1, c3)
+	assert.Equal(t, int32(2), atomic.LoadInt32(&probeCalls))
+	assert.Equal(t, 3, pool.getRefCount(key))
 }

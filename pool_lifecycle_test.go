@@ -195,9 +195,9 @@ func TestClientPool_OwnerShutdownDeadlines(t *testing.T) {
 				client := &poolTestClient{}
 				key := poolIdentity{ClientType: "simple"}
 				factory := func() (redis.UniversalClient, *redislock.Client, error) { return client, nil, nil }
-				_, _, err := pool.acquire(key, nil, factory)
+				_, _, err := pool.acquire(key, nil, factory, nil)
 				require.NoError(t, err)
-				_, _, err = pool.acquire(key, nil, factory)
+				_, _, err = pool.acquire(key, nil, factory, nil)
 				require.NoError(t, err)
 				pool.release(key, tc.first, nil)
 				time.Sleep(tc.interval)
@@ -222,7 +222,7 @@ func TestClientPool_StaleShutdownCallback(t *testing.T) {
 		client := &poolTestClient{}
 		key := poolIdentity{ClientType: "simple"}
 		factory := func() (redis.UniversalClient, *redislock.Client, error) { return client, nil, nil }
-		_, _, err := pool.acquire(key, nil, factory)
+		_, _, err := pool.acquire(key, nil, factory, nil)
 		require.NoError(t, err)
 		pool.release(key, 30*time.Second, nil)
 		pool.mu.Lock()
@@ -238,7 +238,7 @@ func TestClientPool_StaleShutdownCallback(t *testing.T) {
 			pool.closeIdleClient(key, entry, oldGeneration, zap.NewNop().Sugar())
 		}()
 		time.Sleep(30 * time.Second)
-		reused, _, err := pool.acquire(key, nil, factory)
+		reused, _, err := pool.acquire(key, nil, factory, nil)
 		require.NoError(t, err)
 		require.Same(t, client, reused)
 		pool.release(key, 30*time.Second, nil)
@@ -260,11 +260,11 @@ func TestClientPool_ReacquirePreservesShutdownDeadline(t *testing.T) {
 		client := &poolTestClient{}
 		key := poolIdentity{ClientType: "simple"}
 		factory := func() (redis.UniversalClient, *redislock.Client, error) { return client, nil, nil }
-		_, _, err := pool.acquire(key, nil, factory)
+		_, _, err := pool.acquire(key, nil, factory, nil)
 		require.NoError(t, err)
 		pool.release(key, 30*time.Second, nil)
 		time.Sleep(5 * time.Second)
-		_, _, err = pool.acquire(key, nil, factory)
+		_, _, err = pool.acquire(key, nil, factory, nil)
 		require.NoError(t, err)
 		pool.release(key, 0, nil)
 		time.Sleep(25*time.Second - time.Nanosecond)

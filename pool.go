@@ -35,6 +35,7 @@ type pooledClientEntry struct {
 	client          redis.UniversalClient
 	locker          *redislock.Client
 	refCount        int
+	probed          bool // the connection was checked at least once
 	lingerTimer     *time.Timer
 	closeAfter      time.Time
 	timerGeneration uint64
@@ -108,6 +109,7 @@ func (p *redisClientPool) acquire(
 	key poolIdentity,
 	logger *zap.SugaredLogger,
 	factory func() (redis.UniversalClient, *redislock.Client, error),
+	probe func(redis.UniversalClient) error,
 ) (redis.UniversalClient, *redislock.Client, error) {
 	if logger == nil {
 		logger = zap.NewNop().Sugar()
@@ -117,6 +119,14 @@ func (p *redisClientPool) acquire(
 	defer p.mu.Unlock()
 
 	if entry, exists := p.entries[key]; exists {
+		// A client created without a check must be probed before it is handed to
+		// an owner that requires one. On failure the entry is left untouched.
+		if probe != nil && !entry.probed {
+			if err := probe(entry.client); err != nil {
+				return nil, nil, err
+			}
+			entry.probed = true
+		}
 		entry.timerGeneration++ // Invalidate callbacks that have already started.
 		if entry.lingerTimer != nil {
 			if entry.lingerTimer.Stop() {
@@ -133,11 +143,18 @@ func (p *redisClientPool) acquire(
 	if err != nil {
 		return nil, nil, err
 	}
+	if probe != nil {
+		if err := probe(client); err != nil {
+			_ = client.Close()
+			return nil, nil, err
+		}
+	}
 
 	p.entries[key] = &pooledClientEntry{
 		client:   client,
 		locker:   locker,
 		refCount: 1,
+		probed:   probe != nil,
 	}
 	logger.Debugf("Created new pooled Redis client (%s), refCount: 1", key)
 	return client, locker, nil

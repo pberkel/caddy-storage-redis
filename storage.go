@@ -132,6 +132,11 @@ type RedisStorage struct {
 	// ClientShutdownGracePeriod keeps the Redis client available after this instance
 	// is cleaned up so background operations can finish. Default: "10s".
 	ClientShutdownGracePeriod string `json:"client_shutdown_grace_period,omitempty"`
+	// SkipConnectionCheck skips the PING sent to the Redis server while the module is
+	// provisioned, so Caddy can start, reload and validate its configuration without a
+	// reachable server; a connection failure then surfaces on the first storage operation
+	// instead. Default: false
+	SkipConnectionCheck bool `json:"skip_connection_check"`
 
 	client                            redis.UniversalClient
 	locker                            *redislock.Client
@@ -264,8 +269,8 @@ func (rs *RedisStorage) resolveTLSConfig() (*tls.Config, string, error) {
 	return cfg, string(pemBytes), nil
 }
 
-// createRedisClient creates and validates a new Redis client instance based on configuration
-func (rs *RedisStorage) createRedisClient(ctx context.Context, tlsConfig *tls.Config) (redis.UniversalClient, error) {
+// createRedisClient creates a new Redis client instance based on configuration
+func (rs *RedisStorage) createRedisClient(tlsConfig *tls.Config) (redis.UniversalClient, error) {
 
 	// DB was validated in finalizeConfiguration; parse is safe here
 	dbInt, _ := strconv.Atoi(string(rs.DB))
@@ -310,14 +315,6 @@ func (rs *RedisStorage) createRedisClient(ctx context.Context, tlsConfig *tls.Co
 		// Create new Redis Failover Cluster client
 		clusterClient := redis.NewFailoverClusterClient(clientOpts.Failover())
 
-		// Test connection to the Redis cluster
-		err := clusterClient.ForEachShard(ctx, func(ctx context.Context, shard *redis.Client) error {
-			return shard.Ping(ctx).Err()
-		})
-		if err != nil {
-			_ = clusterClient.Close()
-			return nil, err
-		}
 		client = clusterClient
 
 	} else if rs.ClientType == "cluster" || len(clientOpts.Addrs) > 1 {
@@ -325,14 +322,6 @@ func (rs *RedisStorage) createRedisClient(ctx context.Context, tlsConfig *tls.Co
 		// Create new Redis Cluster client
 		clusterClient := redis.NewClusterClient(clientOpts.Cluster())
 
-		// Test connection to the Redis cluster
-		err := clusterClient.ForEachShard(ctx, func(ctx context.Context, shard *redis.Client) error {
-			return shard.Ping(ctx).Err()
-		})
-		if err != nil {
-			_ = clusterClient.Close()
-			return nil, err
-		}
 		client = clusterClient
 
 	} else {
@@ -340,16 +329,20 @@ func (rs *RedisStorage) createRedisClient(ctx context.Context, tlsConfig *tls.Co
 		// Create new Redis simple standalone client
 		c := redis.NewClient(clientOpts.Simple())
 
-		// Test connection to the Redis server
-		err := c.Ping(ctx).Err()
-		if err != nil {
-			_ = c.Close()
-			return nil, err
-		}
 		client = c
 	}
 
 	return client, nil
+}
+
+// pingRedisClient tests the connection to a Redis server, or to every shard of a cluster
+func pingRedisClient(ctx context.Context, client redis.UniversalClient) error {
+	if clusterClient, ok := client.(*redis.ClusterClient); ok {
+		return clusterClient.ForEachShard(ctx, func(ctx context.Context, shard *redis.Client) error {
+			return shard.Ping(ctx).Err()
+		})
+	}
+	return client.Ping(ctx).Err()
 }
 
 // Initialize Redis client and locker using reference-counted pool
@@ -365,14 +358,18 @@ func (rs *RedisStorage) initRedisClient(ctx context.Context) error {
 		rs.clientLifetime = new(clientLifetime)
 	}
 
+	var probe func(redis.UniversalClient) error
+	if !rs.SkipConnectionCheck {
+		probe = func(c redis.UniversalClient) error { return pingRedisClient(ctx, c) }
+	}
 	client, locker, err := defaultPool.acquire(key, rs.logger, func() (redis.UniversalClient, *redislock.Client, error) {
-		c, err := rs.createRedisClient(ctx, tlsConfig)
+		c, err := rs.createRedisClient(tlsConfig)
 		if err != nil {
 			return nil, nil, err
 		}
 		l := redislock.New(c)
 		return c, l, nil
-	})
+	}, probe)
 	if err != nil {
 		return err
 	}
