@@ -67,6 +67,11 @@ type poolIdentity struct {
 }
 
 func (pi poolIdentity) String() string {
+	// Include the connection name when set: clients differing only by name are
+	// separate pool entries and would otherwise log identically.
+	if pi.ClientName != "" {
+		return fmt.Sprintf("%s|%s|%s|name=%s", pi.ClientType, pi.Addrs, pi.DB, pi.ClientName)
+	}
 	return fmt.Sprintf("%s|%s|%s", pi.ClientType, pi.Addrs, pi.DB)
 }
 

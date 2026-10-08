@@ -324,6 +324,42 @@ func TestFinalizeConfiguration_ClientName(t *testing.T) {
 	assert.Equal(t, "caddy-test", name)
 }
 
+func TestFinalizeConfiguration_ClientNameValidation(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		clientName string
+		wantErr    bool
+	}{
+		{"empty (unnamed)", "", false},
+		{"printable ASCII", "caddy-prod_1.eu:a/b", false},
+		{"space", "caddy prod", true},
+		{"tab", "caddy\tprod", true},
+		{"newline", "caddy\nprod", true},
+		{"non-ASCII", "caddé", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rs, mr := newFinalizeTestStorage(t)
+			rs.Address = []string{mr.Addr()}
+			rs.ClientName = tc.clientName
+			rs.ClientShutdownGracePeriod = "0s"
+			// Rejected at load time even when the connection check is skipped.
+			rs.SkipConnectionCheck = true
+
+			err := rs.finalizeConfiguration(context.Background())
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "invalid client_name")
+				return
+			}
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = rs.Cleanup() })
+		})
+	}
+}
+
 func TestFinalizeConfiguration_SkipConnectionCheck(t *testing.T) {
 	t.Parallel()
 

@@ -56,7 +56,7 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
         compression    false   // compression algorithm: 'flate' (raw DEFLATE), 'zlib', or 'false' (no compression, the default). Legacy boolean 'true' maps to 'flate'
         tls_enabled    false
         tls_insecure   false
-        client_name    ""      // connection name shown in CLIENT LIST; default unnamed
+        client_name    ""      // connection name shown in CLIENT LIST (printable ASCII, no spaces); default unnamed
         skip_connection_check false // skip the PING sent at startup; connection errors then surface on first use
         client_shutdown_grace_period "10s" // keep the client available for background work after cleanup (default "10s")
     }
