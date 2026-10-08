@@ -62,6 +62,8 @@ type poolIdentity struct {
 	TlsTrustPEM        string
 	RouteByLatency     bool
 	RouteRandomly      bool
+	// A client that skipped the probe must never be handed to an instance that asked for it.
+	SkipConnectionCheck bool
 }
 
 func (pi poolIdentity) String() string {
@@ -74,20 +76,21 @@ func (rs *RedisStorage) poolKey() poolIdentity {
 	sort.Strings(addrs)
 
 	return poolIdentity{
-		ClientType:         rs.ClientType,
-		Addrs:              strings.Join(addrs, ","),
-		DB:                 rs.DB,
-		Timeout:            rs.Timeout,
-		Username:           rs.Username,
-		Password:           rs.Password,
-		SentinelPassword:   rs.SentinelPassword,
-		MasterName:         rs.MasterName,
-		TlsEnabled:         rs.TlsEnabled,
-		TlsInsecure:        rs.TlsInsecure,
-		TlsServerCertsPEM:  rs.TlsServerCertsPEM,
-		TlsServerCertsPath: rs.TlsServerCertsPath,
-		RouteByLatency:     rs.RouteByLatency,
-		RouteRandomly:      rs.RouteRandomly,
+		ClientType:          rs.ClientType,
+		Addrs:               strings.Join(addrs, ","),
+		DB:                  rs.DB,
+		Timeout:             rs.Timeout,
+		Username:            rs.Username,
+		Password:            rs.Password,
+		SentinelPassword:    rs.SentinelPassword,
+		MasterName:          rs.MasterName,
+		TlsEnabled:          rs.TlsEnabled,
+		TlsInsecure:         rs.TlsInsecure,
+		TlsServerCertsPEM:   rs.TlsServerCertsPEM,
+		TlsServerCertsPath:  rs.TlsServerCertsPath,
+		RouteByLatency:      rs.RouteByLatency,
+		RouteRandomly:       rs.RouteRandomly,
+		SkipConnectionCheck: rs.SkipConnectionCheck,
 	}
 }
 
