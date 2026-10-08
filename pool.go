@@ -48,6 +48,7 @@ type pooledClientEntry struct {
 // underlying go-redis client, so configs differing only in those should
 // still share a connection.
 type poolIdentity struct {
+	ClientName         string
 	ClientType         string
 	Addrs              string // pre-sorted, comma-joined - see poolKey()
 	DB                 DBIndex
@@ -66,6 +67,11 @@ type poolIdentity struct {
 }
 
 func (pi poolIdentity) String() string {
+	// Include the connection name when set: clients differing only by name are
+	// separate pool entries and would otherwise log identically.
+	if pi.ClientName != "" {
+		return fmt.Sprintf("%s|%s|%s|name=%s", pi.ClientType, pi.Addrs, pi.DB, pi.ClientName)
+	}
 	return fmt.Sprintf("%s|%s|%s", pi.ClientType, pi.Addrs, pi.DB)
 }
 
@@ -75,6 +81,7 @@ func (rs *RedisStorage) poolKey() poolIdentity {
 	sort.Strings(addrs)
 
 	return poolIdentity{
+		ClientName:         rs.ClientName,
 		ClientType:         rs.ClientType,
 		Addrs:              strings.Join(addrs, ","),
 		DB:                 rs.DB,

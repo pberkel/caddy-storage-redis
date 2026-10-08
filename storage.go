@@ -129,6 +129,8 @@ type RedisStorage struct {
 	RouteByLatency bool `json:"route_by_latency"`
 	// RouteRandomly Route commands randomly, only used in Cluster mode. Default: false
 	RouteRandomly bool `json:"route_randomly"`
+	// ClientName The connection name set with CLIENT SETNAME, visible in CLIENT LIST. Default: "" (unnamed)
+	ClientName string `json:"client_name"`
 	// ClientShutdownGracePeriod keeps the Redis client available after this instance
 	// is cleaned up so background operations can finish. Default: "10s".
 	ClientShutdownGracePeriod string `json:"client_shutdown_grace_period,omitempty"`
@@ -282,6 +284,7 @@ func (rs *RedisStorage) createRedisClient(tlsConfig *tls.Config) (redis.Universa
 		Username:   rs.Username,
 		Password:   rs.Password,
 		DB:         dbInt,
+		ClientName: rs.ClientName,
 		TLSConfig:  tlsConfig,
 	}
 

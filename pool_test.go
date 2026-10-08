@@ -33,6 +33,9 @@ import (
 func TestClientPool_String(t *testing.T) {
 	key := poolIdentity{ClientType: "simple", Addrs: "test-pool-key", DB: "database"}
 	assert.Equal(t, key.String(), "simple|test-pool-key|database")
+	named := key
+	named.ClientName = "caddy-first"
+	assert.Equal(t, "simple|test-pool-key|database|name=caddy-first", named.String())
 }
 
 func TestClientPool_ReferenceCounting(t *testing.T) {

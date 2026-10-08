@@ -121,6 +121,8 @@ func (rs *RedisStorage) UnmarshalCaddyfile(d *caddyfile.Dispenser) error {
 				if configVal[0] != "" {
 					rs.MasterName = configVal[0]
 				}
+			case "client_name":
+				rs.ClientName = configVal[0]
 			case "key_prefix":
 				if configVal[0] != "" {
 					rs.KeyPrefix = configVal[0]
@@ -249,6 +251,10 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 	rs.Username = repl.ReplaceAll(rs.Username, "")
 	rs.Password = repl.ReplaceAll(rs.Password, "")
 	rs.SentinelPassword = repl.ReplaceAll(rs.SentinelPassword, "")
+	rs.ClientName = repl.ReplaceAll(rs.ClientName, "")
+	if err := validateClientName(rs.ClientName); err != nil {
+		return err
+	}
 	rs.KeyPrefix = repl.ReplaceAll(rs.KeyPrefix, defaultKeyPrefix)
 	keyPrefix, err := normalizeKeyPrefix(rs.KeyPrefix)
 	if err != nil {
@@ -339,6 +345,18 @@ func (rs *RedisStorage) finalizeConfiguration(ctx context.Context) error {
 	}
 
 	return rs.initRedisClient(ctx)
+}
+
+// validateClientName applies Redis's CLIENT SETNAME rule: only printable ASCII
+// other than space ('!' to '~'). Checked at load time so an invalid name fails
+// provisioning even when skip_connection_check defers the first connection.
+func validateClientName(name string) error {
+	for i := 0; i < len(name); i++ {
+		if c := name[i]; c < '!' || c > '~' {
+			return fmt.Errorf("invalid client_name %q: must not contain spaces, newlines or characters outside printable ASCII", name)
+		}
+	}
+	return nil
 }
 
 func normalizeKeyPrefix(prefix string) (string, error) {

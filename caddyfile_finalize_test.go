@@ -23,6 +23,7 @@ import (
 
 	"github.com/alicebob/miniredis/v2"
 	"github.com/caddyserver/caddy/v2/caddyconfig/caddyfile"
+	"github.com/redis/go-redis/v9"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/zap"
@@ -302,6 +303,63 @@ func TestFinalizeConfiguration_AddressHostPortValidation(t *testing.T) {
 	})
 }
 
+func TestFinalizeConfiguration_ClientName(t *testing.T) {
+	t.Setenv("REDIS_CLIENT_NAME", "caddy-test")
+
+	rs, mr := newFinalizeTestStorage(t)
+	rs.Address = []string{mr.Addr()}
+	rs.ClientShutdownGracePeriod = "0s"
+	d := caddyfile.NewTestDispenser(`redis {
+		client_name {env.REDIS_CLIENT_NAME}
+	}`)
+	require.NoError(t, rs.UnmarshalCaddyfile(d))
+
+	err := rs.finalizeConfiguration(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rs.Cleanup() })
+
+	assert.Equal(t, "caddy-test", rs.ClientName)
+	name, err := rs.client.ClientGetName(context.Background()).Result()
+	require.NoError(t, err)
+	assert.Equal(t, "caddy-test", name)
+}
+
+func TestFinalizeConfiguration_ClientNameValidation(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name       string
+		clientName string
+		wantErr    bool
+	}{
+		{"empty (unnamed)", "", false},
+		{"printable ASCII", "caddy-prod_1.eu:a/b", false},
+		{"space", "caddy prod", true},
+		{"tab", "caddy\tprod", true},
+		{"newline", "caddy\nprod", true},
+		{"non-ASCII", "caddé", true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			rs, mr := newFinalizeTestStorage(t)
+			rs.Address = []string{mr.Addr()}
+			rs.ClientName = tc.clientName
+			rs.ClientShutdownGracePeriod = "0s"
+			// Rejected at load time even when the connection check is skipped.
+			rs.SkipConnectionCheck = true
+
+			err := rs.finalizeConfiguration(context.Background())
+			if tc.wantErr {
+				require.Error(t, err)
+				assert.Contains(t, err.Error(), "invalid client_name")
+				return
+			}
+			require.NoError(t, err)
+			t.Cleanup(func() { _ = rs.Cleanup() })
+		})
+	}
+}
+
 func TestFinalizeConfiguration_SkipConnectionCheck(t *testing.T) {
 	t.Parallel()
 
@@ -386,4 +444,46 @@ func TestFinalizeConfiguration_SkipConnectionCheck(t *testing.T) {
 		require.Error(t, err)
 		assert.Contains(t, err.Error(), "skip_connection_check")
 	})
+}
+
+func TestFinalizeConfiguration_ClientNamePooling(t *testing.T) {
+	t.Setenv("REDIS_CLIENT_NAME", "caddy-first")
+	_, mr := newFinalizeTestStorage(t)
+	ctx := context.Background()
+	newStorage := func(name string) *RedisStorage {
+		t.Helper()
+		rs := New()
+		rs.logger = zap.NewNop().Sugar()
+		rs.Address = []string{mr.Addr()}
+		rs.ClientName = name
+		rs.ClientShutdownGracePeriod = "0s"
+		require.NoError(t, rs.finalizeConfiguration(ctx))
+		t.Cleanup(func() { require.NoError(t, rs.Cleanup()) })
+		return rs
+	}
+
+	first := newStorage("{env.REDIS_CLIENT_NAME}")
+	sameName := newStorage("caddy-first")
+	otherName := newStorage("caddy-second")
+	unnamed := newStorage("")
+
+	assert.Same(t, first.client, sameName.client)
+	assert.NotSame(t, first.client, otherName.client)
+	assert.NotSame(t, first.client, unnamed.client)
+	assert.NotSame(t, otherName.client, unnamed.client)
+	for _, rs := range []*RedisStorage{first, sameName, otherName, unnamed} {
+		name, err := rs.client.ClientGetName(ctx).Result()
+		if rs.ClientName == "" {
+			require.ErrorIs(t, err, redis.Nil)
+		} else {
+			require.NoError(t, err)
+		}
+		assert.Equal(t, rs.ClientName, name)
+	}
+
+	// Cleaning up one owner must not close another owner's shared client.
+	require.NoError(t, first.Cleanup())
+	name, err := sameName.client.ClientGetName(ctx).Result()
+	require.NoError(t, err)
+	assert.Equal(t, "caddy-first", name)
 }

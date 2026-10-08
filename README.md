@@ -56,6 +56,7 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
         compression    false   // compression algorithm: 'flate' (raw DEFLATE), 'zlib', or 'false' (no compression, the default). Legacy boolean 'true' maps to 'flate'
         tls_enabled    false
         tls_insecure   false
+        client_name    ""      // connection name shown in CLIENT LIST (printable ASCII, no spaces); default unnamed
         skip_connection_check false // skip the PING sent at startup; connection errors then surface on first use
         client_shutdown_grace_period "10s" // keep the client available for background work after cleanup (default "10s")
     }
@@ -67,7 +68,7 @@ Enable Redis storage for Caddy by specifying the module configuration in the Cad
 ```
 Note that `host` and `port` values can be configured (or accept the defaults) OR an `address` value can be specified, which will override the `host` and `port` values.
 
-`client_shutdown_grace_period` defaults to `10s`. Clients remain open while any storage instance uses them and until every released instance's grace period has elapsed. Set it to `0s` to add no delay for that instance, or increase it when background operations need more time. Instances with the same connection settings share a client across reloads.
+`client_shutdown_grace_period` defaults to `10s`. Clients remain open while any storage instance uses them and until every released instance's grace period has elapsed. Set it to `0s` to add no delay for that instance, or increase it when background operations need more time. Instances with the same connection settings, including `client_name`, share a client across reloads. Different client names use separate clients.
 
 `skip_connection_check` defaults to `false`: the module sends a `PING` while Caddy provisions it, so an unreachable server fails `caddy run`, `caddy reload` and `caddy validate`. Set it to `true` to defer that check. The configuration is still validated, but a connection problem surfaces on the first storage operation instead. Other modules may still use the storage during provisioning (Caddy's internal CA, for example), so this does not guarantee a fully offline validation.
 
@@ -78,6 +79,7 @@ Here's the same config as above, but in JSON format (which Caddy parses all conf
         "address": [
             "127.0.0.1:6379"
         ],
+        "client_name": "",
         "client_type": "simple",
         "compression": false,
         "db": 0,
