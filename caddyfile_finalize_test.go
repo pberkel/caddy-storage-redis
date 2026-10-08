@@ -305,14 +305,23 @@ func TestFinalizeConfiguration_AddressHostPortValidation(t *testing.T) {
 func TestFinalizeConfiguration_SkipConnectionCheck(t *testing.T) {
 	t.Parallel()
 
-	// A port that was listening a moment ago and is closed now: nothing answers on it.
+	// A listener that drops every connection: the port stays reserved for the
+	// test, but no Redis command ever succeeds on it.
 	unreachableAddr := func(t *testing.T) string {
 		t.Helper()
 		l, err := net.Listen("tcp", "127.0.0.1:0")
 		require.NoError(t, err)
-		addr := l.Addr().String()
-		require.NoError(t, l.Close())
-		return addr
+		t.Cleanup(func() { _ = l.Close() })
+		go func() {
+			for {
+				conn, err := l.Accept()
+				if err != nil {
+					return
+				}
+				_ = conn.Close()
+			}
+		}()
+		return l.Addr().String()
 	}
 	newStorage := func(addr string) *RedisStorage {
 		rs := New()

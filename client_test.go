@@ -194,7 +194,7 @@ func newClientTestStorage(t *testing.T, client redis.UniversalClient) *RedisStor
 	var err error
 	rs.client, _, err = defaultPool.acquire(rs.poolKeyVal, nil, func() (redis.UniversalClient, *redislock.Client, error) {
 		return client, nil, nil
-	})
+	}, nil)
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = rs.Cleanup(); defaultPool.reset() })
 	return rs
